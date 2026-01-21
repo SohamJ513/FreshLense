@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>FreshLense</title>
+  <style>
+    body { 
+      width: 300px; 
+      font-family: Arial, sans-serif; 
+      padding: 10px; 
+    }
+    h2 { text-align: center; margin-top: 0; }
+    #message { font-size: 0.9em; min-height: 20px; }
+    
+    /* Button styles */
+    .btn {
+      width: 100%; padding: 10px; font-size: 16px;
+      border: none; cursor: pointer; margin-top: 8px;
+    }
+    .btn:disabled { background-color: #ccc; }
+    
+    #trackButton { background-color: #0d6efd; color: white; }
+    
+    /* NEW BUTTON */
+    #dashboardButton { background-color: #6c757d; color: white; }
+    
+    #logoutButton { background-color: #dc3545; color: white; }
+
+    /* Login form styles */
+    #login-form { display: none; }
+    #tracker-ui { display: none; }
+    input { width: 93%; padding: 8px; margin-bottom: 5px; }
+
+  </style>
+</head>
+<body>
+  <h2>FreshLense</h2>
+
+  <div id="login-form">
+    <p>Please log in to your account:</p>
+    <input type="email" id="email" placeholder="Email" />
+    <input type="password" id="password" placeholder="Password" />
+    <button id="loginButton" class="btn">Login</button>
+  </div>
+
+  <div id="tracker-ui">
+    <div id="message">Loading...</div>
+    <button id="trackButton" class="btn">Track This Page</button>
+    
+    <button id="dashboardButton" class="btn">Go to Dashboard</button>
+    
+    <button id="logoutButton" class="btn">Logout</button>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
