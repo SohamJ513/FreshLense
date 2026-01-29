@@ -1,3 +1,4 @@
+// frontend/src/services/factCheckApi.ts
 import api from './api';
 import { 
   FactCheckRequest, 
@@ -5,12 +6,24 @@ import {
   PageVersionsResponse,
   DirectFactCheckRequest 
 } from '../types/factCheck';
-import { DiffRequest, DiffResponse } from '../types/diff'; // ✅ Import from diff.ts
+import { DiffRequest, DiffResponse } from '../types/diff';
 
 export const factCheckApi = {
-  // Get page versions for fact checking
+  // ✅ FIXED: Get all tracked pages for user
+  getPages: async (): Promise<any[]> => {
+    const response = await api.get('/fact-check/pages');
+    return response.data;
+  },
+
+  // ✅ FIXED: Get page versions - corrected endpoint path
   getPageVersions: async (pageId: string, limit: number = 20): Promise<PageVersionsResponse> => {
-    const response = await api.get(`/fact-check/page/${pageId}/versions?limit=${limit}`);
+    const response = await api.get(`/fact-check/pages/${pageId}/versions?limit=${limit}`);
+    return response.data;
+  },
+
+  // Get specific version by ID
+  getVersionById: async (versionId: string): Promise<any> => {
+    const response = await api.get(`/fact-check/versions/${versionId}`);
     return response.data;
   },
 

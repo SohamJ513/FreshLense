@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
 from ..database import (
@@ -7,41 +7,36 @@ from ..database import (
     pages_collection, 
     get_page_versions,
     get_tracked_page,
+    get_tracked_pages,
     doc_to_dict
 )
 from ..services.fact_check_service import FactCheckService
 from ..services.diff_service import DiffService
 from ..schemas.fact_check import FactCheckRequest, FactCheckResponse, FactCheckItem, ClaimType, Verdict
-from ..schemas.diff import DiffRequest, DiffResponse, ContentChange
-import resend  # ✅ ADD THIS IMPORT
-import os  # ✅ ADD THIS IMPORT
+from ..schemas.diff import DiffRequest, DiffResponse, ContentChange, VersionInfo
+import resend
+import os
 
 router = APIRouter(prefix="/api/fact-check", tags=["fact-check"])
 
-# 🚨 CRITICAL FIX: Create service instance inside functions to avoid caching issues
-# Don't create at module level - create fresh instances when needed
-
+# Service instance for diff operations
 diff_service = DiffService()
 
-# ✅ ADD THIS FUNCTION
+# ✅ EMAIL FUNCTION (keep existing)
 def send_fact_check_email(to_email: str, page_title: str, page_url: str, results_summary: dict):
     """Send fact-check results email via Resend"""
     try:
-        # Configure Resend
         resend.api_key = os.getenv("RESEND_API_KEY")
         if not resend.api_key:
             print("⚠️ RESEND_API_KEY not found in environment")
             return False
         
-        # Get your from email from environment
         from_email = os.getenv("RESEND_FROM_EMAIL", "onboarding@resend.dev")
         
-        # Calculate credibility score
         total = results_summary.get("total_claims", 0)
         verified = results_summary.get("verified_claims", 0)
         credibility_score = int((verified / total * 100)) if total > 0 else 0
         
-        # Prepare email
         params = {
             "from": f"FreshLense <{from_email}>",
             "to": [to_email],
@@ -159,25 +154,129 @@ This is an automated message from FreshLense Web Content Monitoring System."""
         print(f"❌ Failed to send email to {to_email}: {e}")
         return False
 
+# ✅ NEW ENDPOINT: Get all tracked pages for the user
+@router.get("/pages", response_model=List[Dict[str, Any]])
+async def get_user_pages(current_user: dict = Depends(lambda: None)):
+    """Get all tracked pages for the user"""
+    try:
+        # In a real app, you would filter by current_user.id
+        # For now, return all pages (or implement authentication later)
+        pages = get_tracked_pages(None)  # Pass None for now, or user_id when auth is implemented
+        
+        page_list = []
+        for page in pages:
+            # Get version count for each page
+            version_count = versions_collection.count_documents({"page_id": page["_id"]})
+            
+            page_list.append({
+                "id": str(page["_id"]),
+                "url": page["url"],
+                "title": page.get("display_name", page["url"]),
+                "last_checked": page.get("last_checked"),
+                "version_count": version_count,
+                "is_active": page.get("is_active", True)
+            })
+        
+        return page_list
+        
+    except Exception as e:
+        print(f"💥 Error fetching pages: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch pages: {str(e)}")
+
+# ✅ UPDATED ENDPOINT: Get all versions for a specific page WITH PAGE INFO
+@router.get("/pages/{page_id}/versions", response_model=Dict[str, Any])
+async def get_page_versions_endpoint(page_id: str, current_user: dict = Depends(lambda: None)):
+    """Get all versions for a specific page WITH PAGE INFO"""
+    try:
+        # Verify page exists
+        page = get_tracked_page(page_id)
+        if not page:
+            raise HTTPException(status_code=404, detail="Page not found")
+        
+        # Get versions for this page using database function
+        versions = get_page_versions(page_id, limit=100)
+        
+        # Convert to proper format
+        version_list = []
+        for i, version in enumerate(versions):
+            content = version.get("text_content", "")
+            content_preview = content[:200] + "..." if len(content) > 200 else content
+            
+            version_list.append({
+                "id": str(version["_id"]),
+                "page_id": str(version["page_id"]),
+                "version_number": i + 1,
+                "captured_at": version["timestamp"],
+                "content_preview": content_preview,
+                "title": f"Version {i+1} - {version['timestamp'].strftime('%Y-%m-%d %H:%M')}",
+                "has_content": bool(content.strip())
+            })
+        
+        # Reverse to show newest first (most recent at top)
+        version_list.reverse()
+        
+        # Re-number after reversing
+        for i, version in enumerate(version_list):
+            version["version_number"] = i + 1
+        
+        # ✅ FIXED: Return page info AND versions in the structure frontend expects
+        return {
+            "page_info": {
+                "page_id": str(page["_id"]),
+                "url": page.get("url", ""),  # <-- This is what you need!
+                "display_name": page.get("display_name", page.get("url", "Untitled Page")),
+                "last_checked": page.get("last_checked"),
+                "version_count": len(version_list)
+            },
+            "versions": version_list
+        }
+        
+    except Exception as e:
+        print(f"💥 Error fetching versions: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch versions: {str(e)}")
+
+# ✅ NEW ENDPOINT: Get specific version by ID
+@router.get("/versions/{version_id}")
+async def get_version_by_id(version_id: str, current_user: dict = Depends(lambda: None)):
+    """Get a specific page version by ID"""
+    try:
+        version = versions_collection.find_one({"_id": ObjectId(version_id)})
+        if not version:
+            raise HTTPException(status_code=404, detail="Version not found")
+        
+        # Get page info
+        page = get_tracked_page(str(version["page_id"]))
+        
+        return {
+            "id": str(version["_id"]),
+            "page_id": str(version["page_id"]),
+            "timestamp": version["timestamp"],
+            "text_content": version.get("text_content", ""),
+            "html_content": version.get("html_content", ""),
+            "page_title": page.get("display_name", "Unknown") if page else "Unknown",
+            "page_url": page.get("url", "") if page else ""
+        }
+        
+    except Exception as e:
+        print(f"💥 Error fetching version: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch version: {str(e)}")
+
+# ✅ EXISTING ENDPOINTS (keep these as they are)
 @router.post("/check", response_model=FactCheckResponse)
 async def fact_check_page(request: FactCheckRequest, current_user: dict = Depends(lambda: None)):
     """Perform fact checking on a page version"""
     try:
-        # 🚨 CRITICAL FIX: Create fresh FactCheckService instance
         fact_check_service = FactCheckService()
         print("🔄 DEBUG: Created fresh FactCheckService instance")
         
-        # Get the specific page version
         version = versions_collection.find_one({"_id": ObjectId(request.version_id)})
         if not version:
             raise HTTPException(status_code=404, detail="Page version not found")
         
-        # Get page info and verify ownership
         page = get_tracked_page(str(version["page_id"]))
         if not page:
             raise HTTPException(status_code=404, detail="Page not found")
         
-        # Perform fact checking on text content
         text_content = version.get("text_content", "")
         print(f"🔍 DEBUG: Starting fact check on {len(text_content)} chars of content")
         fact_check_results = await fact_check_service.check_content(text_content)
@@ -195,9 +294,6 @@ async def fact_check_page(request: FactCheckRequest, current_user: dict = Depend
             inconclusive_claims=len([r for r in fact_check_results if r.verdict == Verdict.UNVERIFIED])
         )
         
-        # ✅ OPTIONAL: Add email sending for regular fact-check too
-        # You can enable this later if you want
-        
         return response
         
     except Exception as e:
@@ -208,27 +304,23 @@ async def fact_check_page(request: FactCheckRequest, current_user: dict = Depend
 async def fact_check_direct_content(request: dict, current_user: dict = Depends(lambda: None)):
     """Perform fact checking on directly provided text content"""
     try:
-        # 🚨 CRITICAL FIX: Create fresh FactCheckService instance
         fact_check_service = FactCheckService()
         print("🔄 DEBUG: Created fresh FactCheckService instance for direct check")
         
         text_content = request.get("content", "")
         page_url = request.get("page_url", "Direct input")
         page_title = request.get("page_title", "User provided content")
-        user_email = request.get("user_email")  # ✅ Get email from request
+        user_email = request.get("user_email")
         
         if not text_content.strip():
             raise HTTPException(status_code=400, detail="Content cannot be empty")
         
-        # Limit content length to prevent abuse
         if len(text_content) > 15000:
             text_content = text_content[:15000] + "... [content truncated]"
         
         print(f"🔍 DEBUG: Starting direct fact check on {len(text_content)} chars of content")
-        # Perform fact checking on direct text content
         fact_check_results = await fact_check_service.check_content(text_content)
         
-        # Prepare response
         response = FactCheckResponse(
             page_id="direct_input",
             version_id="direct_input",
@@ -242,10 +334,9 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
             inconclusive_claims=len([r for r in fact_check_results if r.verdict == Verdict.UNVERIFIED])
         )
         
-        # ✅ SEND EMAIL IF USER PROVIDED EMAIL
+        # Send email if requested
         if user_email and os.getenv("EMAIL_ENABLED", "true").lower() == "true":
             try:
-                # Prepare results summary
                 results_summary = {
                     "total_claims": len(fact_check_results),
                     "verified_claims": len([r for r in fact_check_results if r.verdict == Verdict.TRUE]),
@@ -253,7 +344,6 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
                     "inconclusive_claims": len([r for r in fact_check_results if r.verdict == Verdict.UNVERIFIED])
                 }
                 
-                # Send email
                 email_sent = send_fact_check_email(
                     to_email=user_email,
                     page_title=page_title,
@@ -268,7 +358,6 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
                 
             except Exception as email_error:
                 print(f"⚠️ Email sending error (but fact-check succeeded): {email_error}")
-                # Don't fail the request if email fails
         
         return response
         
@@ -278,9 +367,8 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
 
 @router.post("/compare", response_model=DiffResponse)
 async def compare_versions(request: DiffRequest, current_user: dict = Depends(lambda: None)):
-    """Compare two page versions and show differences"""
+    """Compare two page versions and show differences WITH ENHANCED HIGHLIGHTING"""
     try:
-        # Get both versions
         old_version = versions_collection.find_one({"_id": ObjectId(request.old_version_id)})
         new_version = versions_collection.find_one({"_id": ObjectId(request.new_version_id)})
         
@@ -290,11 +378,15 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
         if str(old_version["page_id"]) != str(new_version["page_id"]):
             raise HTTPException(status_code=400, detail="Versions must be from the same page")
         
-        # Perform diff comparison
         old_text = old_version.get("text_content", "")
         new_text = new_version.get("text_content", "")
         
         diff_result = diff_service.compare_text(old_text, new_text)
+        metrics = diff_service.calculate_change_metrics(old_text, new_text)
+        html_diff = diff_service.generate_html_diff(old_text, new_text)
+        side_by_side = diff_service.get_side_by_side_diff(old_text, new_text)
+        
+        page = get_tracked_page(str(old_version["page_id"]))
         
         return DiffResponse(
             page_id=str(old_version["page_id"]),
@@ -303,52 +395,26 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
             old_timestamp=old_version["timestamp"],
             new_timestamp=new_version["timestamp"],
             changes=diff_result,
-            total_changes=len(diff_result)
+            total_changes=len(diff_result),
+            change_metrics=metrics,
+            html_diff=html_diff,
+            side_by_side_diff=side_by_side,
+            has_changes=len(diff_result) > 0
         )
         
     except Exception as e:
+        print(f"💥 Comparison failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Comparison failed: {str(e)}")
-
-@router.get("/page/{page_id}/versions")
-async def get_page_versions_for_factcheck(page_id: str, limit: int = 20, current_user: dict = Depends(lambda: None)):
-    """Get page versions with basic info for fact check UI"""
-    try:
-        versions = get_page_versions(page_id, limit)
-        page = get_tracked_page(page_id)
-        
-        version_list = []
-        for version in versions:
-            version_list.append({
-                "version_id": str(version["_id"]),
-                "timestamp": version["timestamp"],
-                "content_preview": version.get("text_content", "")[:200] + "..." if len(version.get("text_content", "")) > 200 else version.get("text_content", ""),
-                "word_count": version.get("metadata", {}).get("word_count", 0),
-                "content_length": version.get("metadata", {}).get("content_length", 0)
-            })
-        
-        return {
-            "page_info": {
-                "page_id": page_id,
-                "url": page.get("url", "") if page else "",
-                "display_name": page.get("display_name", "") if page else ""
-            },
-            "versions": version_list
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get versions: {str(e)}")
 
 @router.get("/debug-serb")
 async def debug_serp_integration():
     """Debug SERP API integration"""
     try:
-        # 🚨 CRITICAL FIX: Create fresh FactCheckService instance
         fact_check_service = FactCheckService()
         print("🔄 DEBUG: Created fresh FactCheckService instance for debug")
         
-        # Check configuration
         config_status = fact_check_service.check_serp_status()
         
-        # Test a claim that should trigger SERP API
         test_claim = {
             "text": "Python 3.6 offers 50% better performance than Python 2.7",
             "type": ClaimType.PERFORMANCE,
