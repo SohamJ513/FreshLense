@@ -1,4 +1,6 @@
 # backend/app/utils/security.py
+from fastapi import HTTPException, Depends, status
+from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import jwt
@@ -13,6 +15,9 @@ SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 # ✅ INCREASED TOKEN EXPIRY TO 24 HOURS FOR TESTING
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))  # 24 hours default
+
+# OAuth2 scheme
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -125,6 +130,52 @@ def get_token_expiry_info(token: str) -> Dict[str, Any]:
         print(f"❌ [JWT] Error getting token info: {e}")
     
     return {"valid": False, "expires_at": None, "time_remaining_seconds": 0}
+
+# ✅ ADDED: get_current_user dependency function
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Get current user from JWT token"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    # Import here to avoid circular imports
+    from ..database import get_user_by_email
+    
+    try:
+        payload = decode_access_token(token)
+        if not payload:
+            raise credentials_exception
+            
+        email: str = payload.get("sub")
+        if not email:
+            print(f"❌ [SECURITY] Token missing 'sub' claim")
+            raise credentials_exception
+        
+        print(f"✅ [SECURITY] Token validated for user: {email}")
+        
+    except jwt.ExpiredSignatureError:
+        print(f"❌ [SECURITY] Token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token expired",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except jwt.InvalidTokenError as e:
+        print(f"❌ [SECURITY] Invalid token: {e}")
+        raise credentials_exception
+    except Exception as e:
+        print(f"❌ [SECURITY] Unexpected token error: {e}")
+        raise credentials_exception
+
+    user = get_user_by_email(email)
+    if not user:
+        print(f"❌ [SECURITY] User not found for email: {email}")
+        raise credentials_exception
+    
+    print(f"✅ [SECURITY] User authenticated: {email}")
+    return user
 
 # Optional: Token blacklist for logout functionality (if needed)
 token_blacklist = set()
