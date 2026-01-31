@@ -10,6 +10,10 @@ import logging
 from difflib import SequenceMatcher
 import resend  # ✅ ADD RESEND IMPORT
 
+# Import our new safe cleanup services
+from .services.mfa_cleanup_service import mfa_cleanup_service
+from .services.audit_service import audit_service
+
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -24,21 +28,36 @@ try:
     print("✅ MongoDB connection successful!")
     db = client['freshlense']
 
+    # Initialize services with database connection
+    mfa_cleanup_service.set_database(db)
+    audit_service.set_database(db)
+
     # Collections
     users_collection = db['users']
     pages_collection = db['tracked_pages']
     versions_collection = db['page_versions']
     changes_collection = db['change_logs']
 
-    # Indexes
+    # Indexes - ✅ UPDATED: No TTL indexes on users collection
     def create_indexes():
+        # Users indexes - SAFE VERSION (NO TTL!)
         users_collection.create_index([("email", ASCENDING)], unique=True)
+        users_collection.create_index([("created_at", DESCENDING)])
+        users_collection.create_index([("mfa_code_expires", ASCENDING)])  # Regular index, not TTL!
+        users_collection.create_index([("is_deleted", ASCENDING)])  # For soft delete queries
+        
+        # Pages indexes
         pages_collection.create_index([("user_id", ASCENDING), ("url", ASCENDING)], unique=True)
         pages_collection.create_index([("user_id", ASCENDING), ("is_active", ASCENDING)])
+        
+        # Versions indexes
         versions_collection.create_index([("page_id", ASCENDING), ("timestamp", DESCENDING)])
+        
+        # Changes indexes
         changes_collection.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
         changes_collection.create_index([("page_id", ASCENDING), ("timestamp", DESCENDING)])
-        print("✅ Database indexes created successfully!")
+        
+        print("✅ Database indexes created successfully (NO TTL on users)!")
 
     create_indexes()
 
@@ -71,22 +90,28 @@ def doc_to_dict(doc):
 
 # ---------------- User ----------------
 def get_user_by_email(email: str):
-    """Get user by email address"""
+    """Get user by email address - EXCLUDE DELETED USERS"""
     if db is None:
         return None
-    user = users_collection.find_one({"email": email})
-    return user  # Return raw doc (main.py expects ObjectId format)
+    user = users_collection.find_one({
+        "email": email,
+        "is_deleted": {"$ne": True}  # ✅ ADDED: Exclude deleted users
+    })
+    return user
 
 
 def get_user_by_id(user_id):
-    """Get user by ID"""
+    """Get user by ID - EXCLUDE DELETED USERS"""
     if db is None:
         return None
     try:
         # Handle both ObjectId and string user_id
         if isinstance(user_id, str):
             user_id = ObjectId(user_id)
-        user = users_collection.find_one({"_id": user_id})
+        user = users_collection.find_one({
+            "_id": user_id,
+            "is_deleted": {"$ne": True}  # ✅ ADDED: Exclude deleted users
+        })
         return user
     except Exception as e:
         print(f"Error getting user by ID: {e}")
@@ -98,6 +123,8 @@ def create_user(user_data: dict):
     if db is None:
         return None
     hashed_password = pwd_context.hash(user_data['password'])
+    
+    # ✅ ADDED: Soft delete fields with defaults
     user_doc = {
         "email": user_data['email'],
         "hashed_password": hashed_password,
@@ -105,12 +132,24 @@ def create_user(user_data: dict):
         "notification_preferences": {
             "email_alerts": True,
             "frequency": "immediately"
-        }
+        },
+        # Soft delete protection
+        "is_deleted": False,
+        "deleted_at": None,
+        "deleted_by": None
     }
+    
     try:
         result = users_collection.insert_one(user_doc)
         user_doc["_id"] = result.inserted_id
-        return user_doc  # Return with ObjectId for main.py normalize_doc
+        
+        # ✅ Log user creation for audit
+        audit_service.log_user_registration(
+            user_id=str(user_doc["_id"]),
+            email=user_data['email']
+        )
+        
+        return user_doc
     except DuplicateKeyError:
         return None
 
@@ -122,7 +161,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 # ---------------- Tracked Pages ----------------
 def get_tracked_pages(user_id, active_only: bool = True):
-    """Get all tracked pages for a user"""
+    """Get all tracked pages for a user - CHECK USER NOT DELETED"""
     if db is None:
         return []
     
@@ -130,11 +169,20 @@ def get_tracked_pages(user_id, active_only: bool = True):
     if isinstance(user_id, str):
         user_id = ObjectId(user_id)
     
+    # ✅ CHECK: User must not be deleted
+    user = users_collection.find_one({
+        "_id": user_id,
+        "is_deleted": {"$ne": True}
+    })
+    
+    if not user:
+        return []  # User doesn't exist or is deleted
+    
     query = {"user_id": user_id}
     if active_only:
         query["is_active"] = True
     pages = pages_collection.find(query).sort("created_at", DESCENDING)
-    return list(pages)  # Return raw docs for main.py normalize_doc
+    return list(pages)
 
 
 def get_tracked_page(page_id: str):
@@ -143,19 +191,28 @@ def get_tracked_page(page_id: str):
         return None
     try:
         page = pages_collection.find_one({"_id": ObjectId(page_id)})
-        return page  # Return raw doc
+        return page
     except:
         return None
 
 
 def create_tracked_page(page_data: dict, user_id):
-    """Create a new tracked page"""
+    """Create a new tracked page - CHECK USER NOT DELETED"""
     if db is None:
         return None
     
     # Handle both ObjectId and string user_id
     if isinstance(user_id, str):
         user_id = ObjectId(user_id)
+    
+    # ✅ CHECK: User must not be deleted
+    user = users_collection.find_one({
+        "_id": user_id,
+        "is_deleted": {"$ne": True}
+    })
+    
+    if not user:
+        return None  # User doesn't exist or is deleted
     
     page_doc = {
         "user_id": user_id,
@@ -171,7 +228,16 @@ def create_tracked_page(page_data: dict, user_id):
     try:
         result = pages_collection.insert_one(page_doc)
         page_doc["_id"] = result.inserted_id
-        return page_doc  # Return raw doc for main.py normalize_doc
+        
+        # ✅ Log page creation for audit
+        audit_service.log_page_operation(
+            user_id=str(user_id),
+            operation="CREATED",
+            page_id=str(page_doc["_id"]),
+            details=f"Created tracked page: {page_data['url']}"
+        )
+        
+        return page_doc
     except DuplicateKeyError:
         return None
 
@@ -198,7 +264,20 @@ def delete_tracked_page(page_id: str) -> bool:
     if db is None:
         return False
     try:
+        # Get page info before deletion for audit log
+        page = get_tracked_page(page_id)
+        
         result = pages_collection.delete_one({"_id": ObjectId(page_id)})
+        
+        if result.deleted_count > 0 and page:
+            # ✅ Log page deletion for audit
+            audit_service.log_page_operation(
+                user_id=str(page.get("user_id", "")),
+                operation="DELETED",
+                page_id=page_id,
+                details=f"Deleted tracked page: {page.get('url', 'unknown')}"
+            )
+        
         return result.deleted_count > 0
     except:
         return False
@@ -214,7 +293,7 @@ def create_page_version(page_id: str, text_content: str, url: str, html_content:
         "page_id": ObjectId(page_id),
         "timestamp": datetime.utcnow(),
         "text_content": text_content,
-        "html_content": html_content,  # Optional parameter
+        "html_content": html_content,
         "metadata": {
             "url": url,
             "content_length": len(text_content),
@@ -225,7 +304,7 @@ def create_page_version(page_id: str, text_content: str, url: str, html_content:
     try:
         result = versions_collection.insert_one(version)
         version["_id"] = result.inserted_id
-        return version  # Return raw doc for main.py normalize_doc
+        return version
     except:
         return None
 
@@ -236,7 +315,7 @@ def get_page_versions(page_id: str, limit: int = 10):
         return []
     try:
         versions = versions_collection.find({"page_id": ObjectId(page_id)}).sort("timestamp", DESCENDING).limit(limit)
-        return list(versions)  # Return raw docs for main.py normalize_doc
+        return list(versions)
     except:
         return []
 
@@ -272,13 +351,13 @@ def get_change_logs_for_page(page_id: str, limit: int = 20):
         return []
     try:
         changes = changes_collection.find({"page_id": ObjectId(page_id)}).sort("timestamp", DESCENDING).limit(limit)
-        return list(changes)  # Return raw docs for main.py normalize_doc
+        return list(changes)
     except:
         return []
 
 
 def get_change_logs_for_user(user_id, limit: int = 20):
-    """Get change logs for a specific user"""
+    """Get change logs for a specific user - CHECK USER NOT DELETED"""
     if db is None:
         return []
     
@@ -286,9 +365,18 @@ def get_change_logs_for_user(user_id, limit: int = 20):
     if isinstance(user_id, str):
         user_id = ObjectId(user_id)
     
+    # ✅ CHECK: User must not be deleted
+    user = users_collection.find_one({
+        "_id": user_id,
+        "is_deleted": {"$ne": True}
+    })
+    
+    if not user:
+        return []  # User doesn't exist or is deleted
+    
     try:
         changes = changes_collection.find({"user_id": user_id}).sort("timestamp", DESCENDING).limit(limit)
-        return list(changes)  # Return raw docs for main.py normalize_doc
+        return list(changes)
     except:
         return []
 
@@ -316,7 +404,7 @@ def get_pages_due_for_check():
             "is_active": True,
             "$or": [
                 {"last_checked": None},
-                {"last_checked": {"$lte": now}}  # This would need more complex logic for intervals
+                {"last_checked": {"$lte": now}}
             ]
         })
         return list(pages)
@@ -347,6 +435,49 @@ def get_latest_page_version(page_id: str):
         return None
 
 
+# ---------------- Safe Cleanup Functions ----------------
+def safe_cleanup_expired_mfa_codes() -> int:
+    """
+    ✅ SAFE VERSION: Clean up expired MFA codes without deleting users
+    Returns number of codes cleaned
+    """
+    if db is None:
+        return 0
+    
+    try:
+        # Use our safe cleanup service
+        cleaned_count = mfa_cleanup_service.cleanup_expired_mfa_codes()
+        
+        if cleaned_count > 0:
+            logger.info(f"✅ Safe MFA cleanup completed: {cleaned_count} codes cleared")
+        
+        return cleaned_count
+    except Exception as e:
+        logger.error(f"❌ Error in safe MFA cleanup: {e}")
+        return 0
+
+
+def safe_cleanup_old_audit_logs(days_to_keep: int = 90) -> int:
+    """
+    ✅ SAFE VERSION: Clean up old audit logs
+    Returns number of logs cleaned
+    """
+    if db is None:
+        return 0
+    
+    try:
+        # Use audit service cleanup
+        cleaned_count = audit_service.cleanup_old_audit_logs(days_to_keep)
+        
+        if cleaned_count > 0:
+            logger.info(f"✅ Safe audit log cleanup: {cleaned_count} logs removed")
+        
+        return cleaned_count
+    except Exception as e:
+        logger.error(f"❌ Error cleaning old audit logs: {e}")
+        return 0
+
+
 # ---------------- MonitoringScheduler Class ----------------
 from .crawler import ContentFetcher
 
@@ -354,7 +485,7 @@ from .crawler import ContentFetcher
 logger = logging.getLogger(__name__)
 
 class MonitoringScheduler:
-    """Background scheduler for monitoring webpage changes"""
+    """Background scheduler for monitoring webpage changes with safe cleanup"""
     
     def __init__(self, check_interval: int = 60):
         """
@@ -379,6 +510,12 @@ class MonitoringScheduler:
             else:
                 logger.info("✅ Email notifications enabled for scheduler")
         
+        # ✅ Cleanup configuration
+        self.cleanup_interval_cycles = 10  # Run cleanup every 10 cycles (~10 minutes)
+        self.cleanup_counter = 0
+        
+        logger.info("✅ MonitoringScheduler initialized with safe cleanup")
+        
     async def start(self):
         """Start the monitoring scheduler"""
         if self.running:
@@ -388,7 +525,7 @@ class MonitoringScheduler:
         self.running = True
         self._loop = asyncio.get_event_loop()
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info("Monitoring scheduler started")
+        logger.info("✅ Monitoring scheduler started with safe cleanup")
         
     async def stop(self):
         """Stop the monitoring scheduler"""
@@ -405,16 +542,52 @@ class MonitoringScheduler:
         logger.info("Monitoring scheduler stopped")
         
     async def _run_scheduler(self):
-        """Main scheduler loop"""
+        """Main scheduler loop with safe cleanup"""
         while self.running:
             try:
+                # Check pages for changes
                 await self._check_pages()
+                
+                # ✅ SAFE CLEANUP: Run cleanup tasks periodically
+                self.cleanup_counter += 1
+                if self.cleanup_counter >= self.cleanup_interval_cycles:
+                    await self._run_safe_cleanup_tasks()
+                    self.cleanup_counter = 0
+                
                 await asyncio.sleep(self.check_interval)
+                
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in scheduler loop: {e}")
                 await asyncio.sleep(self.check_interval)
+    
+    async def _run_safe_cleanup_tasks(self):
+        """✅ NEW: Run safe cleanup tasks that won't delete users"""
+        try:
+            logger.debug("🔄 Running safe cleanup tasks...")
+            
+            # 1. Clean expired MFA codes (SAFE - doesn't delete users)
+            mfa_cleaned = safe_cleanup_expired_mfa_codes()
+            if mfa_cleaned > 0:
+                logger.info(f"🔧 Cleaned {mfa_cleaned} expired MFA codes")
+            
+            # 2. Clean old audit logs (optional, configurable)
+            audit_cleaned = safe_cleanup_old_audit_logs(days_to_keep=90)
+            if audit_cleaned > 0:
+                logger.info(f"🧹 Cleaned {audit_cleaned} old audit logs")
+            
+            # 3. Get MFA cleanup stats for monitoring
+            stats = mfa_cleanup_service.get_mfa_cleanup_stats()
+            if "stats" in stats:
+                expired_count = stats["stats"].get("users_with_expired_mfa_codes", 0)
+                if expired_count > 50:  # Alert threshold
+                    logger.warning(f"⚠️  High number of expired MFA codes: {expired_count}")
+            
+            logger.debug("✅ Safe cleanup tasks completed")
+            
+        except Exception as e:
+            logger.error(f"❌ Error in safe cleanup tasks: {e}")
                 
     async def _check_pages(self):
         """Check all pages that are due for monitoring"""
@@ -425,7 +598,6 @@ class MonitoringScheduler:
             if not pages:
                 return
                 
-            # Changed from logger.info to logger.debug
             logger.debug(f"Checking {len(pages)} pages for changes")
             
             # Process pages concurrently (but limit concurrency)
@@ -776,3 +948,10 @@ Manage notification preferences in your account settings."""
     def is_running(self) -> bool:
         """Property accessor to match main.py expectations"""
         return self.running
+
+    # ✅ NEW: Manual cleanup trigger for testing/debugging
+    async def trigger_safe_cleanup(self):
+        """Manually trigger safe cleanup tasks (for testing/debugging)"""
+        logger.info("🚀 Manually triggering safe cleanup tasks...")
+        await self._run_safe_cleanup_tasks()
+        logger.info("✅ Manual cleanup completed")

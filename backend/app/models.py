@@ -82,6 +82,12 @@ class User(UserBase):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     hashed_password: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+    # ✅ ADDED: Soft delete protection fields
+    is_deleted: bool = Field(default=False)
+    deleted_at: Optional[datetime] = Field(default=None)
+    deleted_by: Optional[str] = Field(default=None)
+    
     notification_preferences: dict = Field(default={
         "email_alerts": True,
         "frequency": NotificationFrequency.IMMEDIATELY
@@ -98,7 +104,7 @@ class User(UserBase):
         populate_by_name=True,
         arbitrary_types_allowed=True,
         json_encoders={ObjectId: str},
-        ser_json_by_alias=True,   # ✅ ensures "id" instead of "_id" in API response
+        ser_json_by_alias=True,
     )
 
 # -------------------------------
@@ -149,7 +155,7 @@ class TrackedPage(TrackedPageBase):
         populate_by_name=True,
         arbitrary_types_allowed=True,
         json_encoders={ObjectId: str},
-        ser_json_by_alias=True,   # ✅ Fix for frontend expecting "id"
+        ser_json_by_alias=True,
     )
 
 # -------------------------------
