@@ -1,6 +1,6 @@
 # backend/app/models.py
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, List, Any, Annotated
+from typing import Optional, List, Any, Annotated, Dict
 from datetime import datetime
 from bson import ObjectId
 from enum import Enum
@@ -28,6 +28,11 @@ class ChangeType(str, Enum):
 class NotificationFrequency(str, Enum):
     IMMEDIATELY = "immediately"
     DAILY_DIGEST = "daily_digest"
+
+class PruneStrategy(str, Enum):
+    SIGNIFICANT_ONLY = "significant_only"
+    ALL = "all"
+    TIME_BASED = "time_based"
 
 # -------------------------------
 # MFA Models (NEW)
@@ -150,6 +155,16 @@ class TrackedPage(TrackedPageBase):
     last_checked: Optional[datetime] = None
     last_change_detected: Optional[datetime] = None
     current_version_id: Optional[PyObjectId] = None
+    
+    # ✅ ADDED: SMART VERSIONING CONFIGURATION
+    versioning_config: Dict[str, Any] = Field(default_factory=lambda: {
+        "min_change_threshold": 0.05,  # 5% change required to save version
+        "require_significant_keywords": True,
+        "max_versions_kept": 50,
+        "check_structural_changes": True,
+        "prune_strategy": PruneStrategy.SIGNIFICANT_ONLY,
+        "notification_threshold": 0.3  # Only notify for changes with score >= 0.3
+    })
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -159,18 +174,42 @@ class TrackedPage(TrackedPageBase):
     )
 
 # -------------------------------
-# Page Version Models
+# Page Version Models - UPDATED WITH SMART VERSIONING
 # -------------------------------
 class PageVersionBase(BaseModel):
     html_content: Optional[str] = None
     text_content: str
     semantic_embedding: Optional[List[float]] = None
 
+class PageVersionCreate(PageVersionBase):
+    """Schema for creating new versions"""
+    pass
+
 class PageVersion(PageVersionBase):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     page_id: PyObjectId
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    metadata: dict = Field(default_factory=dict)
+    
+    # ✅ ADDED: SMART VERSIONING FIELDS
+    content_hash: str = Field(...)  # SHA256 hash of content for quick comparison
+    checksum: str = Field(...)  # MD5 checksum for very fast comparison
+    change_significance_score: float = Field(default=0.0)  # 0-1 score of change significance
+    change_metrics: Dict[str, Any] = Field(default_factory=lambda: {
+        "character_change_percentage": 0.0,
+        "word_change_percentage": 0.0,
+        "structural_changes": 0.0,
+        "similarity_score": 1.0,
+        "words_added": 0,
+        "words_removed": 0,
+        "total_words_old": 0,
+        "total_words_new": 0
+    })
+    
+    metadata: Dict[str, Any] = Field(default_factory=lambda: {
+        "store_reason": "first_version",
+        "analysis": {},
+        "config_used": {}
+    })
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -180,21 +219,51 @@ class PageVersion(PageVersionBase):
     )
 
 # -------------------------------
-# Change Log Models
+# Change Log Models - UPDATED
 # -------------------------------
 class ChangeLogBase(BaseModel):
     type: ChangeType
     description: Optional[str] = None
     semantic_similarity_score: Optional[float] = None
 
+class ChangeLogCreate(ChangeLogBase):
+    """Schema for creating change logs"""
+    page_id: str
+    user_id: str
+    change_significance_score: Optional[float] = None
+    details: Optional[Dict[str, Any]] = None
+
 class ChangeLog(ChangeLogBase):
     id: Optional[PyObjectId] = Field(alias="_id", default=None)
     page_id: PyObjectId
     user_id: PyObjectId
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    versions: dict = Field(default_factory=dict)
-    diff: dict = Field(default_factory=dict)
-    viewed_by_user: bool = Field(default=False)
+    
+    # ✅ UPDATED: Enhanced change tracking
+    change_significance_score: Optional[float] = Field(default=None)
+    versions: Dict[str, Any] = Field(default_factory=lambda: {
+        "old_version_id": None,
+        "new_version_id": None,
+        "old_content_length": 0,
+        "new_content_length": 0
+    })
+    
+    diff: Dict[str, Any] = Field(default_factory=lambda: {
+        "change_percentage": 0.0,
+        "significant_changes": [],
+        "keyword_changes": []
+    })
+    
+    details: Dict[str, Any] = Field(default_factory=lambda: {
+        "url": "",
+        "notification_sent": False,
+        "email_sent_to": None,
+        "viewed_by_user": False,
+        "auto_generated": True
+    })
+    
+    # Renamed for clarity
+    user_viewed: bool = Field(default=False, alias="viewed_by_user")
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -202,3 +271,91 @@ class ChangeLog(ChangeLogBase):
         json_encoders={ObjectId: str},
         ser_json_by_alias=True,
     )
+
+# -------------------------------
+# Versioning Analysis Models
+# -------------------------------
+class VersioningAnalysis(BaseModel):
+    """Model for versioning analysis results"""
+    store: bool = Field(...)
+    reason: str = Field(...)
+    score: float = Field(ge=0.0, le=1.0)  # 0-1 score
+    hash: str = Field(...)
+    checksum: str = Field(...)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    analysis: Dict[str, Any] = Field(default_factory=dict)
+
+class VersioningConfig(BaseModel):
+    """Model for versioning configuration"""
+    min_change_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    require_significant_keywords: bool = Field(default=True)
+    max_versions_kept: int = Field(default=50, ge=1, le=1000)
+    check_structural_changes: bool = Field(default=True)
+    prune_strategy: PruneStrategy = Field(default=PruneStrategy.SIGNIFICANT_ONLY)
+    notification_threshold: float = Field(default=0.3, ge=0.0, le=1.0)
+
+class ChangeMetrics(BaseModel):
+    """Model for change metrics"""
+    character_change_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
+    word_change_percentage: float = Field(default=0.0, ge=0.0, le=100.0)
+    structural_changes: float = Field(default=0.0, ge=0.0, le=100.0)
+    similarity_score: float = Field(default=1.0, ge=0.0, le=1.0)
+    words_added: int = Field(default=0, ge=0)
+    words_removed: int = Field(default=0, ge=0)
+    total_words_old: int = Field(default=0, ge=0)
+    total_words_new: int = Field(default=0, ge=0)
+    lines_added: int = Field(default=0, ge=0)
+    lines_removed: int = Field(default=0, ge=0)
+
+# -------------------------------
+# API Response Models
+# -------------------------------
+class VersioningStatus(BaseModel):
+    """Response model for versioning status"""
+    page_id: str
+    total_versions: int
+    significant_versions: int
+    last_version_score: Optional[float] = None
+    config: VersioningConfig
+    storage_efficiency: float = Field(ge=0.0, le=100.0)  # % of versions actually needed
+
+class SmartVersioningResponse(BaseModel):
+    """Response for smart versioning operations"""
+    saved: bool
+    version_id: Optional[str] = None
+    reason: str
+    score: float
+    analysis: VersioningAnalysis
+    pruned_count: int = Field(default=0)
+
+# -------------------------------
+# Utility Models
+# -------------------------------
+class ContentComparison(BaseModel):
+    """Model for comparing two versions"""
+    old_version_id: str
+    new_version_id: str
+    old_content: Optional[str] = None
+    new_content: Optional[str] = None
+    analysis: Optional[VersioningAnalysis] = None
+
+class PruneResult(BaseModel):
+    """Result of version pruning"""
+    page_id: str
+    versions_kept: int
+    versions_pruned: int
+    kept_versions: List[str] = Field(default_factory=list)
+    pruned_versions: List[str] = Field(default_factory=list)
+
+# -------------------------------
+# Update Models for Backward Compatibility
+# -------------------------------
+class LegacyPageVersion(PageVersion):
+    """Legacy model for backward compatibility"""
+    class Config:
+        extra = "ignore"  # Ignore extra fields from old versions
+
+class LegacyTrackedPage(TrackedPage):
+    """Legacy model for backward compatibility"""
+    class Config:
+        extra = "ignore"  # Ignore missing versioning_config in old pages

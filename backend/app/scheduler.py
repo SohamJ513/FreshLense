@@ -13,6 +13,8 @@ import resend  # ✅ ADD RESEND IMPORT
 # Import our new safe cleanup services
 from .services.mfa_cleanup_service import mfa_cleanup_service
 from .services.audit_service import audit_service
+# ✅ ADD NEW IMPORT
+from .services.versioning_service import VersioningService
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -52,6 +54,9 @@ try:
         
         # Versions indexes
         versions_collection.create_index([("page_id", ASCENDING), ("timestamp", DESCENDING)])
+        # ✅ ADD NEW INDEXES FOR SMART VERSIONING
+        versions_collection.create_index([("page_id", ASCENDING), ("checksum", ASCENDING)])
+        versions_collection.create_index([("page_id", ASCENDING), ("change_significance_score", DESCENDING)])
         
         # Changes indexes
         changes_collection.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
@@ -214,6 +219,7 @@ def create_tracked_page(page_data: dict, user_id):
     if not user:
         return None  # User doesn't exist or is deleted
     
+    # ✅ ADD VERSIONING CONFIG TO NEW PAGES
     page_doc = {
         "user_id": user_id,
         "url": page_data["url"],
@@ -224,6 +230,14 @@ def create_tracked_page(page_data: dict, user_id):
         "last_checked": None,
         "last_change_detected": None,
         "current_version_id": None,
+        # ✅ ADD VERSIONING CONFIG
+        "versioning_config": {
+            "min_change_threshold": 0.05,  # 5% change required
+            "require_significant_keywords": True,
+            "max_versions_kept": 50,
+            "check_structural_changes": True,
+            "prune_strategy": "significant_only"
+        }
     }
     try:
         result = pages_collection.insert_one(page_doc)
@@ -285,15 +299,27 @@ def delete_tracked_page(page_id: str) -> bool:
 
 # ---------------- Page Versions ----------------
 def create_page_version(page_id: str, text_content: str, url: str, html_content: str = None):
-    """Create a new page version"""
+    """✅ UPDATED: Create a new page version with smart versioning fields"""
     if db is None:
         return None
+    
+    # ✅ ADD SMART VERSIONING FIELDS
+    from .services.versioning_service import VersioningService
+    versioning_service = VersioningService()
     
     version = {
         "page_id": ObjectId(page_id),
         "timestamp": datetime.utcnow(),
         "text_content": text_content,
         "html_content": html_content,
+        # ✅ SMART VERSIONING FIELDS
+        "content_hash": versioning_service.calculate_content_hash(text_content),
+        "checksum": versioning_service.calculate_quick_checksum(text_content),
+        "change_significance_score": 1.0,  # Default for first version
+        "change_metrics": {
+            "content_length": len(text_content),
+            "word_count": len(text_content.split()) if text_content else 0,
+        },
         "metadata": {
             "url": url,
             "content_length": len(text_content),
@@ -485,7 +511,7 @@ from .crawler import ContentFetcher
 logger = logging.getLogger(__name__)
 
 class MonitoringScheduler:
-    """Background scheduler for monitoring webpage changes with safe cleanup"""
+    """Background scheduler for monitoring webpage changes with smart versioning"""
     
     def __init__(self, check_interval: int = 60):
         """
@@ -499,6 +525,8 @@ class MonitoringScheduler:
         self.task: Optional[asyncio.Task] = None
         self._loop = None
         self.content_fetcher = ContentFetcher()  # Initialize the content fetcher
+        # ✅ ADD SMART VERSIONING SERVICE
+        self.versioning_service = VersioningService()
         
         # ✅ EMAIL CONFIGURATION
         self.email_enabled = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
@@ -514,7 +542,7 @@ class MonitoringScheduler:
         self.cleanup_interval_cycles = 10  # Run cleanup every 10 cycles (~10 minutes)
         self.cleanup_counter = 0
         
-        logger.info("✅ MonitoringScheduler initialized with safe cleanup")
+        logger.info("✅ MonitoringScheduler initialized with SMART VERSIONING")
         
     async def start(self):
         """Start the monitoring scheduler"""
@@ -525,7 +553,7 @@ class MonitoringScheduler:
         self.running = True
         self._loop = asyncio.get_event_loop()
         self.task = asyncio.create_task(self._run_scheduler())
-        logger.info("✅ Monitoring scheduler started with safe cleanup")
+        logger.info("✅ Monitoring scheduler started with SMART VERSIONING")
         
     async def stop(self):
         """Stop the monitoring scheduler"""
@@ -542,7 +570,7 @@ class MonitoringScheduler:
         logger.info("Monitoring scheduler stopped")
         
     async def _run_scheduler(self):
-        """Main scheduler loop with safe cleanup"""
+        """Main scheduler loop with smart versioning"""
         while self.running:
             try:
                 # Check pages for changes
@@ -563,7 +591,7 @@ class MonitoringScheduler:
                 await asyncio.sleep(self.check_interval)
     
     async def _run_safe_cleanup_tasks(self):
-        """✅ NEW: Run safe cleanup tasks that won't delete users"""
+        """✅ Run safe cleanup tasks that won't delete users"""
         try:
             logger.debug("🔄 Running safe cleanup tasks...")
             
@@ -602,7 +630,7 @@ class MonitoringScheduler:
             
             # Process pages concurrently (but limit concurrency)
             semaphore = asyncio.Semaphore(5)  # Limit to 5 concurrent requests
-            tasks = [self._check_single_page(page, semaphore) for page in pages]
+            tasks = [self._check_single_page_smart(page, semaphore) for page in pages]
             
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -634,8 +662,8 @@ class MonitoringScheduler:
             logger.error(f"Error getting pages due for check: {e}")
             return []
             
-    async def _check_single_page(self, page, semaphore):
-        """Check a single page for changes"""
+    async def _check_single_page_smart(self, page, semaphore):
+        """✅ UPDATED: Check a single page for changes with SMART VERSIONING"""
         async with semaphore:
             try:
                 page_id = str(page["_id"])
@@ -645,37 +673,59 @@ class MonitoringScheduler:
                 current_content = await self._fetch_page_content(url)
                 if not current_content:
                     logger.warning(f"Failed to fetch content for {url}")
+                    # Still update last_checked even if fetch failed
+                    update_tracked_page(page_id, {"last_checked": datetime.utcnow()})
                     return
                     
-                # Get the latest version for comparison
-                latest_version = get_latest_page_version(page_id)
-                old_content = latest_version.get("text_content", "") if latest_version else ""
+                # Get page-specific versioning config
+                page_config = page.get("versioning_config", {
+                    "min_change_threshold": 0.05,  # 5% change required
+                    "require_significant_keywords": True,
+                    "max_versions_kept": 50,
+                    "check_structural_changes": True,
+                    "prune_strategy": "significant_only"
+                })
+                
+                # ✅ USE SMART VERSIONING: Only save if significant
+                new_version_id = self.versioning_service.save_version_if_significant(
+                    page_id=page_id,
+                    new_content=current_content,
+                    html_content=None,  # You can pass HTML if you store it
+                    config=page_config
+                )
                 
                 # Update last_checked timestamp
                 update_tracked_page(page_id, {"last_checked": datetime.utcnow()})
                 
-                # ✅ CHECK IF CONTENT HAS CHANGED
-                if latest_version and old_content == current_content:
-                    # No change detected
+                # If no new version was saved (insignificant change)
+                if not new_version_id:
+                    logger.debug(f"ℹ️  Skipped version for {url} - insignificant changes")
                     return
-                    
-                # ✅ CALCULATE CHANGE PERCENTAGE
+                
+                # Get the new version to calculate metrics
+                new_version = versions_collection.find_one({"_id": ObjectId(new_version_id)})
+                if not new_version:
+                    logger.error(f"Failed to retrieve new version {new_version_id}")
+                    return
+                
+                # ✅ GET OLD VERSION FOR COMPARISON
+                old_version = get_latest_page_version(page_id)
+                old_content = old_version.get("text_content", "") if old_version else ""
+                
+                # Calculate change percentage for notification
                 change_percentage = self._calculate_change_percentage(old_content, current_content)
                 
-                # Create new version
-                new_version = create_page_version(
-                    page_id=page_id, 
-                    text_content=current_content, 
-                    url=url, 
-                    html_content=None
-                )
+                # Update page with new version ID
+                update_data = {
+                    "current_version_id": new_version_id,
+                    "last_change_detected": datetime.utcnow()
+                }
+                update_tracked_page(page_id, update_data)
                 
-                if not new_version:
-                    logger.error(f"Failed to create version for page {page_id}")
-                    return
+                # ✅ SEND EMAIL NOTIFICATION IF ENABLED AND CHANGE IS SIGNIFICANT
+                if (self.email_enabled and change_percentage > 0 and 
+                    new_version.get("change_significance_score", 0) >= page_config.get("min_change_threshold", 0.05)):
                     
-                # ✅ SEND EMAIL NOTIFICATION IF ENABLED
-                if self.email_enabled and change_percentage > 0:
                     await self._send_change_notification(
                         page=page,
                         change_percentage=change_percentage,
@@ -684,14 +734,7 @@ class MonitoringScheduler:
                         new_content_length=len(current_content)
                     )
                 
-                # Update page with new version ID
-                update_data = {
-                    "current_version_id": str(new_version["_id"]),
-                    "last_change_detected": datetime.utcnow()
-                }
-                update_tracked_page(page_id, update_data)
-                
-                # Create change log with change percentage
+                # Create change log entry
                 change_data = {
                     "user_id": page["user_id"],
                     "page_id": page_id,
@@ -702,18 +745,91 @@ class MonitoringScheduler:
                         "content_length": len(current_content),
                         "previous_length": len(old_content),
                         "change_percentage": change_percentage,
-                        "notification_sent": self.email_enabled
+                        "significance_score": new_version.get("change_significance_score", 0),
+                        "notification_sent": self.email_enabled,
+                        "version_id": new_version_id
                     }
                 }
                 
                 change_log_id = create_change_log(change_data)
                 if change_log_id:
-                    logger.info(f"Change detected for page {page_id}: {url} ({change_percentage}% change)")
+                    significance = new_version.get("change_significance_score", 0)
+                    logger.info(f"✅ Saved SIGNIFICANT version for {url}: {change_percentage}% change (score: {significance})")
                 else:
                     logger.error(f"Failed to create change log for page {page_id}")
                     
             except Exception as e:
                 logger.error(f"Error checking page {page.get('url', 'unknown')}: {e}")
+    
+    # Keep old method for backward compatibility
+    async def _check_single_page(self, page, semaphore):
+        """Legacy method - calls new smart method"""
+        return await self._check_single_page_smart(page, semaphore)
+    
+    # ✅ ADDED: UPDATE EXISTING PAGES CONFIG
+    def update_existing_pages_config(self):
+        """Update existing tracked pages with versioning configuration"""
+        try:
+            all_pages = get_all_active_pages()
+            updated_count = 0
+            
+            for page in all_pages:
+                page_id = str(page["_id"])
+                
+                # Check if page already has versioning config
+                if "versioning_config" not in page:
+                    update_data = {
+                        "versioning_config": {
+                            "min_change_threshold": 0.05,
+                            "require_significant_keywords": True,
+                            "max_versions_kept": 50,
+                            "check_structural_changes": True,
+                            "prune_strategy": "significant_only"
+                        }
+                    }
+                    
+                    if update_tracked_page(page_id, update_data):
+                        updated_count += 1
+            
+            logger.info(f"✅ Updated {updated_count} pages with versioning configuration")
+            return updated_count
+            
+        except Exception as e:
+            logger.error(f"Error updating page configs: {e}")
+            return 0
+    
+    # ✅ ADDED: CLEANUP EXISTING VERSIONS
+    async def cleanup_existing_versions(self):
+        """Clean up existing insignificant versions (one-time migration)"""
+        try:
+            logger.info("🧹 Starting cleanup of existing insignificant versions...")
+            
+            all_pages = get_all_active_pages()
+            total_pruned = 0
+            
+            for page in all_pages:
+                page_id = str(page["_id"])
+                
+                # Use default config
+                config = {
+                    "max_versions_kept": 50,
+                    "keep_significant_threshold": 0.3,
+                    "keep_time_based": True,
+                    "keep_oldest": True
+                }
+                
+                pruned = self.versioning_service.prune_old_versions(page_id, config)
+                total_pruned += pruned
+                
+                # Small delay to avoid overwhelming the database
+                await asyncio.sleep(0.1)
+            
+            logger.info(f"✅ Cleanup completed: {total_pruned} versions pruned")
+            return total_pruned
+            
+        except Exception as e:
+            logger.error(f"Error during version cleanup: {e}")
+            return 0
     
     # ✅ ADDED: CALCULATE CHANGE PERCENTAGE
     def _calculate_change_percentage(self, old_content: str, new_content: str) -> float:
@@ -955,3 +1071,18 @@ Manage notification preferences in your account settings."""
         logger.info("🚀 Manually triggering safe cleanup tasks...")
         await self._run_safe_cleanup_tasks()
         logger.info("✅ Manual cleanup completed")
+
+    # ✅ NEW: Run migration to update existing pages
+    async def run_migration(self):
+        """Run migration to update existing pages and versions"""
+        logger.info("🚀 Starting versioning migration...")
+        
+        # 1. Update existing pages with versioning config
+        updated_pages = self.update_existing_pages_config()
+        logger.info(f"✅ Updated {updated_pages} pages with versioning config")
+        
+        # 2. Clean up existing insignificant versions
+        pruned_versions = await self.cleanup_existing_versions()
+        logger.info(f"✅ Pruned {pruned_versions} insignificant versions")
+        
+        logger.info("🎉 Migration completed successfully!")

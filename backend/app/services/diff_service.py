@@ -1,6 +1,7 @@
 import difflib
 import re
-from typing import List, Tuple, Dict, Any
+import hashlib
+from typing import List, Tuple, Dict, Any, Optional
 from html import escape
 from ..schemas.diff import ContentChange, ChangeType
 
@@ -332,26 +333,245 @@ class DiffService:
         
         return '\n'.join(html_parts)
     
-    def calculate_change_metrics(self, old_text: str, new_text: str) -> dict:
-        """Calculate change statistics"""
+    def calculate_change_metrics(self, old_text: str, new_text: str) -> Dict[str, Any]:
+        """✅ ENHANCED: Calculate comprehensive change statistics for versioning"""
         old_text = old_text or ""
         new_text = new_text or ""
         
+        # Basic word metrics
         words_old = old_text.split()
         words_new = new_text.split()
         
-        # Get character-level changes for more accurate metrics
-        char_diff = difflib.SequenceMatcher(None, old_text, new_text).ratio()
+        # Character-level similarity
+        char_similarity = difflib.SequenceMatcher(None, old_text, new_text).ratio()
+        
+        # Line-level changes
+        old_lines = old_text.splitlines()
+        new_lines = new_text.splitlines()
+        
+        # Word-level changes (more accurate than set difference)
+        word_differ = difflib.SequenceMatcher(None, words_old, words_new)
+        word_changes = sum(size for tag, i1, i2, j1, j2 in word_differ.get_opcodes() 
+                          if tag != 'equal')
+        
+        # Line-level structural changes
+        line_differ = difflib.SequenceMatcher(None, old_lines, new_lines)
+        line_changes = sum(size for tag, i1, i2, j1, j2 in line_differ.get_opcodes() 
+                          if tag != 'equal')
+        
+        # Calculate percentages
+        total_words_old = len(words_old)
+        total_words_new = len(words_new)
+        total_lines_old = len(old_lines)
+        total_lines_new = len(new_lines)
+        
+        word_change_percentage = (word_changes / max(total_words_old, total_words_new, 1)) * 100
+        line_change_percentage = (line_changes / max(total_lines_old, total_lines_new, 1)) * 100
+        
+        # ✅ ADDED: Technical keyword detection (for tech blogs)
+        tech_keywords = [
+            'security', 'vulnerability', 'update', 'critical', 'bug', 'fix',
+            'release', 'version', 'deprecated', 'breaking', 'important',
+            'urgent', 'warning', 'alert', 'patch', 'exploit', 'risk',
+            'cve-', 'mitigation', 'workaround', 'upgrade', 'downgrade',
+            'compatibility', 'performance', 'memory', 'cpu', 'storage',
+            'latency', 'throughput', 'regression', 'feature', 'api'
+        ]
+        
+        old_lower = old_text.lower()
+        new_lower = new_text.lower()
+        
+        keyword_changes = 0
+        keyword_details = []
+        for keyword in tech_keywords:
+            old_has = keyword in old_lower
+            new_has = keyword in new_lower
+            if old_has != new_has:
+                keyword_changes += 1
+                keyword_details.append({
+                    'keyword': keyword,
+                    'action': 'added' if new_has and not old_has else 'removed',
+                    'context': self._extract_keyword_context(keyword, old_text if old_has else new_text)
+                })
+        
+        # ✅ ADDED: Calculate significance score components
+        significance_components = {
+            'character_similarity': char_similarity * 100,
+            'word_change_ratio': word_change_percentage,
+            'line_change_ratio': line_change_percentage,
+            'keyword_changes': keyword_changes,
+            'structural_changes': line_change_percentage * 0.5  # Weighted
+        }
+        
+        # Calculate overall significance score (0-1)
+        significance_score = self._calculate_significance_score(significance_components)
         
         return {
+            # Basic metrics
             "words_added": len(set(words_new) - set(words_old)),
             "words_removed": len(set(words_old) - set(words_new)),
-            "total_words_old": len(words_old),
-            "total_words_new": len(words_new),
-            "similarity_score": char_diff * 100,
-            "change_percentage": (1 - char_diff) * 100,
-            "lines_added": len(new_text.splitlines()) - len(old_text.splitlines()) if len(new_text.splitlines()) > len(old_text.splitlines()) else 0,
-            "lines_removed": len(old_text.splitlines()) - len(new_text.splitlines()) if len(old_text.splitlines()) > len(new_text.splitlines()) else 0
+            "total_words_old": total_words_old,
+            "total_words_new": total_words_new,
+            "similarity_score": char_similarity * 100,
+            "change_percentage": (1 - char_similarity) * 100,
+            "lines_added": len(new_lines) - len(old_lines) if len(new_lines) > len(old_lines) else 0,
+            "lines_removed": len(old_lines) - len(new_lines) if len(old_lines) > len(new_lines) else 0,
+            
+            # ✅ ENHANCED METRICS
+            "word_change_percentage": word_change_percentage,
+            "line_change_percentage": line_change_percentage,
+            "character_similarity": char_similarity * 100,
+            "structural_change_count": line_changes,
+            "word_change_count": word_changes,
+            
+            # ✅ SMART VERSIONING METRICS
+            "significance_score": significance_score,
+            "keyword_changes": keyword_changes,
+            "keyword_details": keyword_details,
+            "significance_components": significance_components,
+            
+            # Content hashes for quick comparison
+            "content_hash_old": self.calculate_content_hash(old_text) if old_text else None,
+            "content_hash_new": self.calculate_content_hash(new_text) if new_text else None,
+            "checksum_old": self.calculate_quick_checksum(old_text) if old_text else None,
+            "checksum_new": self.calculate_quick_checksum(new_text) if new_text else None
+        }
+    
+    def _calculate_significance_score(self, components: Dict[str, float]) -> float:
+        """Calculate overall change significance score (0-1)"""
+        # Weights for different components
+        weights = {
+            'character_similarity': 0.3,      # 30% weight
+            'word_change_ratio': 0.4,         # 40% weight
+            'line_change_ratio': 0.2,         # 20% weight
+            'keyword_changes': 0.1,           # 10% weight
+            'structural_changes': 0.1         # 10% weight
+        }
+        
+        score = 0.0
+        
+        # Normalize character similarity (higher similarity = lower significance)
+        char_sim = components.get('character_similarity', 100)
+        score += ((100 - min(char_sim, 100)) / 100) * weights['character_similarity']
+        
+        # Normalize word change ratio
+        word_change = min(components.get('word_change_ratio', 0), 100)
+        score += (word_change / 100) * weights['word_change_ratio']
+        
+        # Normalize line change ratio
+        line_change = min(components.get('line_change_ratio', 0), 100)
+        score += (line_change / 100) * weights['line_change_ratio']
+        
+        # Keyword changes (each keyword change adds to score)
+        keyword_changes = min(components.get('keyword_changes', 0), 10)  # Cap at 10
+        score += (keyword_changes / 10) * weights['keyword_changes']
+        
+        # Structural changes
+        structural = min(components.get('structural_changes', 0), 100)
+        score += (structural / 100) * weights['structural_changes']
+        
+        # Cap at 1.0
+        return min(score, 1.0)
+    
+    def _extract_keyword_context(self, keyword: str, text: str, context_chars: int = 100) -> str:
+        """Extract context around a keyword"""
+        if not text:
+            return ""
+        
+        lower_text = text.lower()
+        idx = lower_text.find(keyword)
+        if idx == -1:
+            return ""
+        
+        start = max(0, idx - context_chars)
+        end = min(len(text), idx + len(keyword) + context_chars)
+        
+        context = text[start:end]
+        if start > 0:
+            context = "..." + context
+        if end < len(text):
+            context = context + "..."
+        
+        return context
+    
+    def calculate_content_hash(self, text: str) -> str:
+        """✅ ADDED: Calculate SHA256 hash of content for accurate comparison"""
+        return hashlib.sha256(text.encode('utf-8')).hexdigest()
+    
+    def calculate_quick_checksum(self, text: str) -> str:
+        """✅ ADDED: Calculate MD5 checksum for very fast comparison"""
+        return hashlib.md5(text.encode('utf-8')).hexdigest()
+    
+    def analyze_change_significance(self, old_text: str, new_text: str, 
+                                   min_threshold: float = 0.05) -> Dict[str, Any]:
+        """✅ ADDED: Comprehensive analysis of change significance"""
+        # Quick checks first
+        if not old_text and new_text:
+            return {
+                "store": True,
+                "reason": "First version",
+                "score": 1.0,
+                "significant": True,
+                "analysis_type": "first_version"
+            }
+        
+        if old_text == new_text:
+            return {
+                "store": False,
+                "reason": "Identical content",
+                "score": 0.0,
+                "significant": False,
+                "analysis_type": "identical"
+            }
+        
+        # Quick checksum comparison
+        if self.calculate_quick_checksum(old_text) == self.calculate_quick_checksum(new_text):
+            return {
+                "store": False,
+                "reason": "Identical checksum",
+                "score": 0.0,
+                "significant": False,
+                "analysis_type": "identical_checksum"
+            }
+        
+        # Calculate detailed metrics
+        metrics = self.calculate_change_metrics(old_text, new_text)
+        significance_score = metrics.get("significance_score", 0.0)
+        
+        # Determine if significant enough
+        significant = significance_score >= min_threshold
+        
+        reasons = []
+        if significance_score >= 0.7:
+            reasons.append("Major content restructuring")
+        elif significance_score >= 0.5:
+            reasons.append("Substantial content changes")
+        elif significance_score >= 0.3:
+            reasons.append("Moderate content updates")
+        elif significance_score >= 0.1:
+            reasons.append("Minor content tweaks")
+        else:
+            reasons.append("Insignificant changes")
+        
+        # Add specific reasons based on metrics
+        if metrics.get("keyword_changes", 0) > 0:
+            reasons.append(f"{metrics['keyword_changes']} technical keywords changed")
+        
+        if metrics.get("word_change_percentage", 0) > 20:
+            reasons.append(f"High word change ({metrics['word_change_percentage']:.1f}%)")
+        elif metrics.get("word_change_percentage", 0) > 10:
+            reasons.append(f"Moderate word change ({metrics['word_change_percentage']:.1f}%)")
+        
+        return {
+            "store": significant,
+            "reason": "; ".join(reasons),
+            "score": significance_score,
+            "significant": significant,
+            "metrics": metrics,
+            "hash": self.calculate_content_hash(new_text),
+            "checksum": self.calculate_quick_checksum(new_text),
+            "analysis_type": "detailed_analysis",
+            "threshold_used": min_threshold
         }
     
     def get_side_by_side_diff(self, old_text: str, new_text: str) -> List[Dict[str, Any]]:

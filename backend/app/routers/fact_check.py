@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from bson import ObjectId
@@ -154,7 +154,7 @@ This is an automated message from FreshLense Web Content Monitoring System."""
         print(f"❌ Failed to send email to {to_email}: {e}")
         return False
 
-# ✅ NEW ENDPOINT: Get all tracked pages for the user
+# ✅ UPDATED ENDPOINT: Get all tracked pages for the user WITH VERSIONING INFO
 @router.get("/pages", response_model=List[Dict[str, Any]])
 async def get_user_pages(current_user: dict = Depends(lambda: None)):
     """Get all tracked pages for the user"""
@@ -168,13 +168,25 @@ async def get_user_pages(current_user: dict = Depends(lambda: None)):
             # Get version count for each page
             version_count = versions_collection.count_documents({"page_id": page["_id"]})
             
+            # ✅ ADDED: Get significant versions count
+            significant_versions = versions_collection.count_documents({
+                "page_id": page["_id"],
+                "change_significance_score": {"$gte": 0.3}
+            })
+            
             page_list.append({
                 "id": str(page["_id"]),
                 "url": page["url"],
                 "title": page.get("display_name", page["url"]),
                 "last_checked": page.get("last_checked"),
                 "version_count": version_count,
-                "is_active": page.get("is_active", True)
+                "significant_versions": significant_versions,
+                "is_active": page.get("is_active", True),
+                # ✅ ADDED: Versioning config
+                "versioning_config": page.get("versioning_config", {
+                    "min_change_threshold": 0.05,
+                    "max_versions_kept": 50
+                })
             })
         
         return page_list
@@ -183,24 +195,38 @@ async def get_user_pages(current_user: dict = Depends(lambda: None)):
         print(f"💥 Error fetching pages: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch pages: {str(e)}")
 
-# ✅ UPDATED ENDPOINT: Get all versions for a specific page WITH PAGE INFO
+# ✅ ENHANCED ENDPOINT: Get all versions for a specific page WITH FILTERING
 @router.get("/pages/{page_id}/versions", response_model=Dict[str, Any])
-async def get_page_versions_endpoint(page_id: str, current_user: dict = Depends(lambda: None)):
-    """Get all versions for a specific page WITH PAGE INFO"""
+async def get_page_versions_endpoint(
+    page_id: str, 
+    show_all: bool = Query(default=False, description="Show all versions including insignificant ones"),
+    min_significance: float = Query(default=0.3, ge=0.0, le=1.0, description="Minimum significance score to show"),
+    current_user: dict = Depends(lambda: None)
+):
+    """Get all versions for a specific page WITH SMART FILTERING"""
     try:
         # Verify page exists
         page = get_tracked_page(page_id)
         if not page:
             raise HTTPException(status_code=404, detail="Page not found")
         
-        # Get versions for this page using database function
-        versions = get_page_versions(page_id, limit=100)
+        # Build query based on filters
+        query = {"page_id": ObjectId(page_id)}
+        if not show_all:
+            query["change_significance_score"] = {"$gte": min_significance}
         
-        # Convert to proper format
+        # Get versions with sorting
+        versions = list(versions_collection.find(query).sort("timestamp", -1).limit(100))
+        
+        # Convert to proper format with ENHANCED INFO
         version_list = []
         for i, version in enumerate(versions):
             content = version.get("text_content", "")
             content_preview = content[:200] + "..." if len(content) > 200 else content
+            
+            # ✅ ADDED: Smart versioning info
+            significance_score = version.get("change_significance_score", 0.0)
+            change_metrics = version.get("change_metrics", {})
             
             version_list.append({
                 "id": str(version["_id"]),
@@ -209,36 +235,46 @@ async def get_page_versions_endpoint(page_id: str, current_user: dict = Depends(
                 "captured_at": version["timestamp"],
                 "content_preview": content_preview,
                 "title": f"Version {i+1} - {version['timestamp'].strftime('%Y-%m-%d %H:%M')}",
-                "has_content": bool(content.strip())
+                "has_content": bool(content.strip()),
+                # ✅ ADDED: Smart versioning fields
+                "significance_score": significance_score,
+                "is_significant": significance_score >= 0.3,
+                "change_percentage": change_metrics.get("change_percentage", 0.0),
+                "word_count": change_metrics.get("total_words_new", 0),
+                "checksum": version.get("checksum", ""),
+                "content_hash": version.get("content_hash", "")
             })
         
-        # Reverse to show newest first (most recent at top)
-        version_list.reverse()
-        
-        # Re-number after reversing
+        # Re-number after reversing (already sorted newest first)
         for i, version in enumerate(version_list):
             version["version_number"] = i + 1
         
-        # ✅ FIXED: Return page info AND versions in the structure frontend expects
         return {
             "page_info": {
                 "page_id": str(page["_id"]),
-                "url": page.get("url", ""),  # <-- This is what you need!
+                "url": page.get("url", ""),
                 "display_name": page.get("display_name", page.get("url", "Untitled Page")),
                 "last_checked": page.get("last_checked"),
-                "version_count": len(version_list)
+                "version_count": len(versions),
+                "significant_versions": len([v for v in version_list if v.get("is_significant", False)]),
+                "versioning_config": page.get("versioning_config", {})
             },
-            "versions": version_list
+            "versions": version_list,
+            "filters_applied": {
+                "show_all": show_all,
+                "min_significance": min_significance,
+                "total_filtered": len(version_list)
+            }
         }
         
     except Exception as e:
         print(f"💥 Error fetching versions: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch versions: {str(e)}")
 
-# ✅ NEW ENDPOINT: Get specific version by ID
+# ✅ ENHANCED ENDPOINT: Get specific version by ID WITH DETAILED INFO
 @router.get("/versions/{version_id}")
 async def get_version_by_id(version_id: str, current_user: dict = Depends(lambda: None)):
-    """Get a specific page version by ID"""
+    """Get a specific page version by ID WITH SMART VERSIONING DETAILS"""
     try:
         version = versions_collection.find_one({"_id": ObjectId(version_id)})
         if not version:
@@ -247,6 +283,23 @@ async def get_version_by_id(version_id: str, current_user: dict = Depends(lambda
         # Get page info
         page = get_tracked_page(str(version["page_id"]))
         
+        # ✅ ADDED: Calculate significance analysis if not already present
+        significance_score = version.get("change_significance_score")
+        if significance_score is None:
+            # Get previous version for comparison
+            prev_version = versions_collection.find_one(
+                {"page_id": version["page_id"], "timestamp": {"$lt": version["timestamp"]}},
+                sort=[("timestamp", -1)]
+            )
+            
+            if prev_version:
+                old_text = prev_version.get("text_content", "")
+                new_text = version.get("text_content", "")
+                analysis = diff_service.analyze_change_significance(old_text, new_text)
+                significance_score = analysis["score"]
+            else:
+                significance_score = 1.0  # First version
+        
         return {
             "id": str(version["_id"]),
             "page_id": str(version["page_id"]),
@@ -254,7 +307,14 @@ async def get_version_by_id(version_id: str, current_user: dict = Depends(lambda
             "text_content": version.get("text_content", ""),
             "html_content": version.get("html_content", ""),
             "page_title": page.get("display_name", "Unknown") if page else "Unknown",
-            "page_url": page.get("url", "") if page else ""
+            "page_url": page.get("url", "") if page else "",
+            # ✅ ADDED: Smart versioning info
+            "significance_score": significance_score,
+            "is_significant": significance_score >= 0.3,
+            "content_hash": version.get("content_hash"),
+            "checksum": version.get("checksum"),
+            "change_metrics": version.get("change_metrics", {}),
+            "metadata": version.get("metadata", {})
         }
         
     except Exception as e:
@@ -365,9 +425,10 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
         print(f"💥 Direct fact checking failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Direct fact checking failed: {str(e)}")
 
+# ✅ ENHANCED ENDPOINT: Compare versions WITH SIGNIFICANCE ANALYSIS
 @router.post("/compare", response_model=DiffResponse)
 async def compare_versions(request: DiffRequest, current_user: dict = Depends(lambda: None)):
-    """Compare two page versions and show differences WITH ENHANCED HIGHLIGHTING"""
+    """Compare two page versions and show differences WITH SIGNIFICANCE ANALYSIS"""
     try:
         old_version = versions_collection.find_one({"_id": ObjectId(request.old_version_id)})
         new_version = versions_collection.find_one({"_id": ObjectId(request.new_version_id)})
@@ -380,6 +441,9 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
         
         old_text = old_version.get("text_content", "")
         new_text = new_version.get("text_content", "")
+        
+        # ✅ ADDED: Significance analysis
+        significance_analysis = diff_service.analyze_change_significance(old_text, new_text)
         
         diff_result = diff_service.compare_text(old_text, new_text)
         metrics = diff_service.calculate_change_metrics(old_text, new_text)
@@ -399,12 +463,89 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
             change_metrics=metrics,
             html_diff=html_diff,
             side_by_side_diff=side_by_side,
-            has_changes=len(diff_result) > 0
+            has_changes=len(diff_result) > 0,
+            # ✅ ADDED: Significance info
+            significance_analysis=significance_analysis,
+            old_version_significance=old_version.get("change_significance_score", 0.0),
+            new_version_significance=new_version.get("change_significance_score", 0.0),
+            should_store_version=significance_analysis.get("store", False)
         )
         
     except Exception as e:
         print(f"💥 Comparison failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Comparison failed: {str(e)}")
+
+# ✅ NEW ENDPOINT: Get versioning statistics
+@router.get("/pages/{page_id}/versioning-stats")
+async def get_versioning_stats(page_id: str, current_user: dict = Depends(lambda: None)):
+    """Get versioning statistics and efficiency metrics"""
+    try:
+        page = get_tracked_page(page_id)
+        if not page:
+            raise HTTPException(status_code=404, detail="Page not found")
+        
+        # Get all versions
+        all_versions = list(versions_collection.find(
+            {"page_id": ObjectId(page_id)},
+            sort=[("timestamp", -1)]
+        ))
+        
+        # Calculate statistics
+        total_versions = len(all_versions)
+        significant_versions = len([v for v in all_versions if v.get("change_significance_score", 0) >= 0.3])
+        insignificant_versions = total_versions - significant_versions
+        
+        # Calculate storage efficiency
+        efficiency = (significant_versions / total_versions * 100) if total_versions > 0 else 100
+        
+        # Get versioning config
+        config = page.get("versioning_config", {
+            "min_change_threshold": 0.05,
+            "max_versions_kept": 50,
+            "require_significant_keywords": True
+        })
+        
+        return {
+            "page_id": page_id,
+            "page_url": page.get("url", ""),
+            "statistics": {
+                "total_versions": total_versions,
+                "significant_versions": significant_versions,
+                "insignificant_versions": insignificant_versions,
+                "storage_efficiency": round(efficiency, 1),
+                "average_significance_score": round(
+                    sum(v.get("change_significance_score", 0) for v in all_versions) / total_versions 
+                    if total_versions > 0 else 0, 
+                    3
+                )
+            },
+            "versioning_config": config,
+            "recommendations": self._generate_versioning_recommendations(
+                total_versions, significant_versions, efficiency, config
+            )
+        }
+        
+    except Exception as e:
+        print(f"💥 Error getting versioning stats: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get versioning stats: {str(e)}")
+
+def _generate_versioning_recommendations(self, total: int, significant: int, efficiency: float, config: dict) -> List[str]:
+    """Generate recommendations for versioning optimization"""
+    recommendations = []
+    
+    if efficiency < 70:
+        recommendations.append(f"Consider increasing min_change_threshold from {config.get('min_change_threshold', 0.05)} to 0.1")
+    
+    if total > config.get('max_versions_kept', 50) * 0.8:
+        recommendations.append(f"Page has {total} versions, close to max limit of {config.get('max_versions_kept', 50)}")
+    
+    if significant == 0 and total > 10:
+        recommendations.append("No significant versions found. Content may not be changing meaningfully.")
+    
+    if efficiency > 90:
+        recommendations.append("Versioning efficiency is excellent!")
+    
+    return recommendations
 
 @router.get("/debug-serb")
 async def debug_serp_integration():
