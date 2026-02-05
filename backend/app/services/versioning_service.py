@@ -2,12 +2,34 @@ import hashlib
 from datetime import datetime
 from typing import Optional, Dict, Any
 from bson import ObjectId
-from ..database import versions_collection, pages_collection
-from .diff_service import DiffService
 
 class VersioningService:
-    def __init__(self):
-        self.diff_service = DiffService()
+    def __init__(self, database=None):
+        self.diff_service = None
+        self.database = database
+        
+        # Lazy import of diff_service to avoid circular imports
+        self._ensure_diff_service()
+    
+    def _ensure_diff_service(self):
+        """Lazy load diff service to avoid circular imports"""
+        if self.diff_service is None:
+            from .diff_service import DiffService
+            self.diff_service = DiffService()
+    
+    def set_database(self, database):
+        """Set database connection"""
+        self.database = database
+        self._ensure_database_collections()
+    
+    def _ensure_database_collections(self):
+        """Ensure we have access to database collections"""
+        if self.database is None:  # ✅ FIXED: Use "is None" instead of "not self.database"
+            return
+        
+        global versions_collection, pages_collection
+        versions_collection = self.database.get('page_versions', None)
+        pages_collection = self.database.get('tracked_pages', None)
     
     def calculate_content_hash(self, text: str) -> str:
         """Calculate SHA256 hash of content for quick comparison"""
@@ -104,6 +126,7 @@ class VersioningService:
             reasons.append(f"{word_change:.1%} of words changed")
         
         # 3. Structural changes (20% weight)
+        line_change = 0
         if default_config["check_structural_changes"]:
             old_lines = max(len(old_text.splitlines()), 1)
             line_change = abs(metrics["lines_added"] - metrics["lines_removed"]) / old_lines
@@ -113,6 +136,7 @@ class VersioningService:
                 reasons.append(f"Line count changed by {line_change:.1%}")
         
         # 4. Important keywords (10% weight)
+        keyword_changes = 0
         if default_config["require_significant_keywords"]:
             important_keywords = [
                 'security', 'vulnerability', 'update', 'critical', 'bug', 'fix',
@@ -126,7 +150,6 @@ class VersioningService:
             old_lower = old_text.lower()
             new_lower = new_text.lower()
             
-            keyword_changes = 0
             for keyword in important_keywords:
                 old_has = keyword in old_lower
                 new_has = keyword in new_lower
@@ -150,8 +173,8 @@ class VersioningService:
             "analysis": {
                 "character_similarity": metrics["similarity_score"],
                 "word_change_ratio": word_change,
-                "line_change_ratio": line_change if default_config["check_structural_changes"] else 0,
-                "significant_keywords_found": keyword_changes if default_config["require_significant_keywords"] else 0
+                "line_change_ratio": line_change,
+                "significant_keywords_found": keyword_changes
             }
         }
     
@@ -163,6 +186,11 @@ class VersioningService:
         
         Returns: version_id if saved, None if skipped
         """
+        # Check if database is available
+        if self.database is None or versions_collection is None or pages_collection is None:  # ✅ FIXED
+            print("❌ Database not available for versioning")
+            return None
+        
         # Get the latest version
         latest_version = versions_collection.find_one(
             {"page_id": ObjectId(page_id)},
@@ -226,6 +254,10 @@ class VersioningService:
     
     def prune_old_versions(self, page_id: str, config: Optional[Dict] = None):
         """Remove old, insignificant versions"""
+        # Check if database is available
+        if self.database is None or versions_collection is None:  # ✅ FIXED
+            return 0
+        
         default_config = {
             "max_versions_kept": 50,
             "keep_significant_threshold": 0.3,
@@ -289,3 +321,7 @@ class VersioningService:
             print(f"🧹 Pruned {deleted_count} old versions for page {page_id}")
         
         return deleted_count
+
+# Global collections (will be set by scheduler.py)
+versions_collection = None
+pages_collection = None

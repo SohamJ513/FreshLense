@@ -92,6 +92,7 @@ async def validate_token(token: Dict[str, str]):
     # Check if token is valid
     if is_token_valid(token_str):
         token_info = get_token_expiry_info(token_str)
+        logger.debug(f"Token validated for subject: {token_info.get('subject')}")  # Changed to debug
         return {
             "valid": True,
             "message": "Token is valid",
@@ -100,6 +101,7 @@ async def validate_token(token: Dict[str, str]):
             "subject": token_info.get("subject")
         }
     else:
+        logger.warning(f"Invalid or expired token received")
         return {
             "valid": False,
             "message": "Token is invalid or expired",
@@ -118,6 +120,7 @@ async def register(user_data: UserCreate):
     # Check if user already exists
     existing_user = get_user_by_email(user_data.email)
     if existing_user:
+        logger.warning(f"Registration attempted for existing email: {user_data.email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
@@ -133,12 +136,13 @@ async def register(user_data: UserCreate):
     })
     
     if not user:
+        logger.error(f"Failed to create user: {user_data.email}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create user"
         )
     
-    logger.info(f"New user registered with MFA enabled: {user['email']}")
+    logger.info(f"New user registered: {user['email']}")  # Keep as INFO
     
     # Send MFA code for setup
     await send_mfa_code_to_user(user)
@@ -163,6 +167,7 @@ async def login(user_credentials: UserLogin):
     
     if not user:
         # Return generic error for security
+        logger.warning(f"Login attempt for non-existent user: {user_credentials.email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
@@ -170,6 +175,7 @@ async def login(user_credentials: UserLogin):
     
     # Verify password
     if not verify_password(user_credentials.password, user["hashed_password"]):
+        logger.warning(f"Invalid password for user: {user['email']}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
@@ -177,7 +183,7 @@ async def login(user_credentials: UserLogin):
     
     # ✅ Check if MFA is enabled for this user (default is True)
     if user.get("mfa_enabled", True):  # Default to True if not set
-        logger.info(f"MFA required for user: {user['email']}")
+        logger.debug(f"MFA required for user: {user['email']}")  # Changed to debug
         
         # Send MFA code automatically
         await send_mfa_code_to_user(user)
@@ -194,7 +200,7 @@ async def login(user_credentials: UserLogin):
     
     # ✅ DEBUG: Log token creation
     token_info = get_token_expiry_info(access_token)
-    logger.info(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")
+    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")  # Changed to debug
     
     return {
         "access_token": access_token,
@@ -222,10 +228,12 @@ async def send_mfa_code(request: Dict[str, str]):
     user = get_user_by_email(email)
     if not user:
         # Return success even if user doesn't exist for security
+        logger.debug(f"MFA code requested for non-existent user: {email}")  # Changed to debug
         return {"message": "If the email exists, a verification code has been sent"}
     
     # Check if MFA is enabled
     if not user.get("mfa_enabled", True):  # Default to True
+        logger.warning(f"MFA not enabled for user: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA is not enabled for this account"
@@ -252,6 +260,7 @@ async def verify_mfa_code(request: MFAVerifyRequest):
     
     user = get_user_by_email(email)
     if not user:
+        logger.warning(f"MFA verification for non-existent user: {email}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials"
@@ -272,6 +281,7 @@ async def verify_mfa_code(request: MFAVerifyRequest):
     is_valid, error_message = mfa_service.is_code_valid(stored_code, mfa_code, expires_at)
     
     if not is_valid:
+        logger.warning(f"Invalid MFA code for user: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_message
@@ -280,28 +290,18 @@ async def verify_mfa_code(request: MFAVerifyRequest):
     # Clear MFA code after successful verification
     clear_user_mfa_code(user["_id"])
     
-    print(f"\n" + "="*60)
-    print(f"✅ MFA Verification Successful for: {user['email']}")
-    
     # Create access token
     access_token = create_access_token(data={"sub": user["email"]})
     
     # ✅ CRITICAL: Validate the token immediately after creation
     token_info = get_token_expiry_info(access_token)
-    print(f"🔍 [AUTH] Token Validation Check:")
-    print(f"   - Valid: {token_info['valid']}")
-    print(f"   - Expires at: {token_info['expires_at']}")
-    print(f"   - Time remaining: {token_info['time_remaining_seconds']:.0f} seconds")
-    print(f"   - Subject: {token_info['subject']}")
     
+    # Log only errors or warnings, not successful validations
     if not token_info['valid']:
-        print(f"❌ [AUTH] CRITICAL: Token is INVALID immediately after creation!")
-        print(f"   - This explains the session expiry issue")
-    
-    print("="*60 + "\n")
+        logger.error(f"CRITICAL: Token invalid immediately after creation for user: {user['email']}")
     
     # Log successful MFA verification
-    logger.info(f"MFA verification successful for user: {user['email']}")
+    logger.info(f"MFA verification successful for user: {user['email']}")  # Keep as INFO
     
     return {
         "access_token": access_token,
@@ -319,24 +319,20 @@ async def forgot_password(request: ForgotPasswordRequest):
     Initiate password reset process.
     Always returns success to prevent email enumeration attacks.
     """
-    logger.info(f"🔍 [DEBUG] Forgot password requested for: {request.email}")
+    logger.debug(f"Forgot password requested for: {request.email}")  # Changed to debug
     
     user = get_user_by_email(request.email)
     
     # Always return success to prevent email enumeration
     if not user:
-        logger.info(f"[DEBUG] Password reset requested for non-existent email: {request.email}")
+        logger.debug(f"Password reset requested for non-existent email: {request.email}")  # Changed to debug
         return ForgotPasswordResponse(
             message="If the email exists, a reset link has been sent"
         )
     
-    logger.info(f"✅ [DEBUG] User found: {user['email']}, ID: {user['_id']}")
-    
     # Generate reset token
     reset_token = secrets.token_urlsafe(32)
     expires_at = datetime.utcnow() + timedelta(hours=1)  # Token valid for 1 hour
-    
-    logger.info(f"🔑 [DEBUG] Generated reset token: {reset_token[:10]}...")
     
     # Save token to database
     token_created = create_password_reset_token(
@@ -346,22 +342,18 @@ async def forgot_password(request: ForgotPasswordRequest):
     )
     
     if not token_created:
-        logger.error(f"❌ [DEBUG] Failed to create password reset token for user: {user['email']}")
+        logger.error(f"Failed to create password reset token for user: {user['email']}")
         # Still return success for security
         return ForgotPasswordResponse(
             message="If the email exists, a reset link has been sent"
         )
     
-    logger.info(f"💾 [DEBUG] Token saved to database successfully")
-    
     # Send reset email
     try:
-        logger.info(f"📤 [DEBUG] Attempting to send reset email to {user['email']}")
         result = await send_reset_email(user["email"], reset_token, user["email"])
-        logger.info(f"📧 [DEBUG] Reset email send result: {result}")
-        logger.info(f"✅ Password reset email sent to: {user['email']}")
+        logger.info(f"Password reset email sent to: {user['email']}")  # Keep as INFO
     except Exception as e:
-        logger.error(f"❌ [DEBUG] Failed to send reset email to {user['email']}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to send reset email to {user['email']}: {str(e)}")
         # Still return success for security
     
     return ForgotPasswordResponse(
@@ -380,6 +372,7 @@ async def reset_password(request: ResetPasswordRequest):
     token_record = get_valid_password_reset_token(request.token)
     
     if not token_record:
+        logger.warning(f"Invalid password reset token used")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset token"
@@ -392,6 +385,7 @@ async def reset_password(request: ResetPasswordRequest):
     )
     
     if not password_updated:
+        logger.error(f"Failed to reset password for user ID: {token_record['user_id']}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to reset password"
@@ -400,7 +394,7 @@ async def reset_password(request: ResetPasswordRequest):
     # Mark token as used
     mark_password_reset_token_used(request.token)
     
-    logger.info(f"Password reset successful for user ID: {token_record['user_id']}")
+    logger.info(f"Password reset successful for user ID: {token_record['user_id']}")  # Keep as INFO
     
     return ResetPasswordResponse(
         message="Password reset successfully"
@@ -431,6 +425,7 @@ async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks)
     
     # Check if MFA is already enabled
     if user.get("mfa_enabled", False):
+        logger.warning(f"MFA setup requested but already enabled for: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA is already enabled for this account"
@@ -448,6 +443,7 @@ async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks)
     success = update_user_mfa_status(user["_id"], update_data)
     
     if not success:
+        logger.error(f"Failed to enable MFA for user: {email}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to enable MFA"
@@ -459,7 +455,7 @@ async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks)
         user_email=user["email"]
     )
     
-    logger.info(f"MFA enabled for user: {user['email']}")
+    logger.info(f"MFA enabled for user: {user['email']}")  # Keep as INFO
     
     return {
         "message": "MFA enabled successfully",
@@ -488,6 +484,7 @@ async def disable_mfa(request: Dict[str, str]):
     
     # Check if MFA is already disabled
     if not user.get("mfa_enabled", True):  # Default to True
+        logger.warning(f"MFA disable requested but already disabled for: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA is already disabled for this account"
@@ -504,12 +501,13 @@ async def disable_mfa(request: Dict[str, str]):
     success = update_user_mfa_status(user["_id"], update_data)
     
     if not success:
+        logger.error(f"Failed to disable MFA for user: {email}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to disable MFA"
         )
     
-    logger.info(f"MFA disabled for user: {user['email']}")
+    logger.info(f"MFA disabled for user: {user['email']}")  # Keep as INFO
     
     return {"message": "MFA disabled successfully"}
 
@@ -520,6 +518,7 @@ async def get_mfa_status(email: str):
     """
     user = get_user_by_email(email)
     if not user:
+        logger.warning(f"MFA status requested for non-existent user: {email}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found"
@@ -559,7 +558,7 @@ async def send_mfa_code_to_user(user: Dict[str, Any]):
             mfa_code=mfa_code,
             user_email=user["email"]
         )
-        logger.info(f"MFA code sent to {mfa_email} for user {user['email']}")
+        logger.debug(f"MFA code sent to {mfa_email} for user {user['email']}")  # Changed to debug
     except Exception as e:
         logger.error(f"Failed to send MFA email to {mfa_email}: {e}")
         # Don't raise error to prevent email enumeration

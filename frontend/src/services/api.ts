@@ -43,6 +43,7 @@ interface AxiosErrorResponse<T = ErrorResponseData> {
 // Create axios instance
 const api = axios.create({
   baseURL: API_BASE_URL,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -572,12 +573,12 @@ export const getMFADataFromError = (error: any): MFALoginResponse | null => {
   return null;
 };
 
-// ✅ NEW: Test function to verify API connectivity
+// ✅ NEW: Test function to verify API connectivity - FIXED: Changed timeout from 5000 to 30000
 export const testAPIConnection = async (): Promise<{ success: boolean; message: string }> => {
   try {
     console.log(`🧪 [API Test] Testing connection to ${API_BASE_URL}`);
     const response = await api.get('/health', {
-      timeout: 5000,
+      timeout: 30000, // ✅ FIXED: Changed from 5000 to 30000
       validateStatus: (status) => status < 500
     });
     console.log(`✅ [API Test] Connection successful:`, response.status);

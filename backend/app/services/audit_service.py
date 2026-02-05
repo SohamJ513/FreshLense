@@ -3,7 +3,7 @@
 Audit logging service to track user operations for security and debugging.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from typing import Optional, Dict, Any, List
 import traceback
@@ -28,7 +28,7 @@ class AuditService:
         Log any audit event.
         Returns True if logged successfully.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             logger.warning(f"AUDIT SKIPPED: {operation} - User: {user_id} (DB not available)")
             return False
         
@@ -170,7 +170,7 @@ class AuditService:
         Retrieve audit logs with filtering options.
         Useful for admin dashboard or debugging.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             logger.error("Database connection not available")
             return []
         
@@ -213,12 +213,10 @@ class AuditService:
         Get summary of user activity for a specific user.
         Useful for user profile or admin review.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             return {"error": "Database not available"}
         
         try:
-            from datetime import timedelta
-            
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
             
@@ -270,12 +268,10 @@ class AuditService:
         Generate a system health report from audit logs.
         Useful for monitoring and alerts.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             return {"error": "Database not available"}
         
         try:
-            from datetime import timedelta
-            
             end_date = datetime.utcnow()
             start_date = end_date - timedelta(days=days)
             
@@ -356,7 +352,7 @@ class AuditService:
         Clean up audit logs older than specified days.
         Returns number of logs deleted.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             return 0
         
         try:

@@ -7,8 +7,12 @@ import jwt
 from passlib.context import CryptContext
 import os
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 # JWT Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
@@ -50,13 +54,8 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     
-    # ✅ DEBUG LOGGING
-    print(f"🔐 [JWT] Token created:")
-    print(f"   - Subject: {data.get('sub', 'N/A')}")
-    print(f"   - Issued at (UTC): {now}")
-    print(f"   - Expires at (UTC): {expire}")
-    print(f"   - Duration: {ACCESS_TOKEN_EXPIRE_MINUTES} minutes ({ACCESS_TOKEN_EXPIRE_MINUTES/60:.1f} hours)")
-    print(f"   - Token preview: {encoded_jwt[:50]}...")
+    # ✅ DEBUG LOGGING - Changed to debug level
+    logger.debug(f"Token created for subject: {data.get('sub', 'N/A')}")
     
     return encoded_jwt
 
@@ -65,26 +64,15 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         
-        # ✅ DEBUG LOGGING
-        print(f"🔐 [JWT] Token decoded:")
-        print(f"   - Subject: {payload.get('sub', 'N/A')}")
-        print(f"   - Issued at: {datetime.fromtimestamp(payload.get('iat', 0)) if payload.get('iat') else 'N/A'}")
-        print(f"   - Expires at: {datetime.fromtimestamp(payload.get('exp', 0)) if payload.get('exp') else 'N/A'}")
-        print(f"   - Current time (UTC): {datetime.utcnow()}")
-        
-        # Check if token is expired
-        if 'exp' in payload:
-            expiry_time = datetime.fromtimestamp(payload['exp'])
-            current_time = datetime.utcnow()
-            time_remaining = expiry_time - current_time
-            print(f"   - Time remaining: {time_remaining}")
+        # ✅ DEBUG LOGGING - Changed to debug level
+        logger.debug(f"Token decoded for subject: {payload.get('sub', 'N/A')}")
         
         return payload
     except jwt.ExpiredSignatureError:
-        print(f"❌ [JWT] Token expired")
+        logger.warning(f"Token expired")  # Changed to warning
         return None
     except jwt.InvalidTokenError as e:
-        print(f"❌ [JWT] Invalid token: {e}")
+        logger.warning(f"Invalid token: {e}")  # Changed to warning
         return None
 
 def get_user_id_from_token(token: str) -> Optional[str]:
@@ -101,10 +89,10 @@ def is_token_valid(token: str) -> bool:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": True})
         return True
     except jwt.ExpiredSignatureError:
-        print(f"⚠️ [JWT] Token expired")
+        logger.debug(f"Token expired")  # Changed to debug
         return False
     except jwt.InvalidTokenError:
-        print(f"⚠️ [JWT] Invalid token")
+        logger.debug(f"Invalid token")  # Changed to debug
         return False
 
 # ✅ ADDED: Function to get token expiry info
@@ -127,7 +115,7 @@ def get_token_expiry_info(token: str) -> Dict[str, Any]:
                 "subject": payload.get('sub')
             }
     except Exception as e:
-        print(f"❌ [JWT] Error getting token info: {e}")
+        logger.error(f"Error getting token info: {e}")  # Keep error for actual errors
     
     return {"valid": False, "expires_at": None, "time_remaining_seconds": 0}
 
@@ -150,31 +138,31 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
         email: str = payload.get("sub")
         if not email:
-            print(f"❌ [SECURITY] Token missing 'sub' claim")
+            logger.warning(f"Token missing 'sub' claim")  # Changed to warning
             raise credentials_exception
         
-        print(f"✅ [SECURITY] Token validated for user: {email}")
+        logger.debug(f"Token validated for user: {email}")  # Changed to debug
         
     except jwt.ExpiredSignatureError:
-        print(f"❌ [SECURITY] Token expired")
+        logger.warning(f"Token expired")  # Changed to warning
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
-        print(f"❌ [SECURITY] Invalid token: {e}")
+        logger.warning(f"Invalid token: {e}")  # Changed to warning
         raise credentials_exception
     except Exception as e:
-        print(f"❌ [SECURITY] Unexpected token error: {e}")
+        logger.error(f"Unexpected token error: {e}")  # Keep error for actual errors
         raise credentials_exception
 
     user = get_user_by_email(email)
     if not user:
-        print(f"❌ [SECURITY] User not found for email: {email}")
+        logger.warning(f"User not found for email: {email}")  # Changed to warning
         raise credentials_exception
     
-    print(f"✅ [SECURITY] User authenticated: {email}")
+    logger.debug(f"User authenticated: {email}")  # Changed to debug
     return user
 
 # Optional: Token blacklist for logout functionality (if needed)

@@ -26,7 +26,7 @@ class MFACleanupService:
         Remove expired MFA codes from active users.
         Returns number of users cleaned.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             logger.error("Database connection not available")
             return 0
         
@@ -69,7 +69,7 @@ class MFACleanupService:
         Clean expired MFA code for a specific user.
         Returns True if cleaned, False otherwise.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             logger.error("Database connection not available")
             return False
         
@@ -118,7 +118,7 @@ class MFACleanupService:
         Get list of users with expired MFA codes.
         Useful for monitoring or manual intervention.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             logger.error("Database connection not available")
             return []
         
@@ -157,7 +157,7 @@ class MFACleanupService:
         Get statistics about MFA cleanup.
         Useful for monitoring dashboard.
         """
-        if not self.db:
+        if self.db is None:  # ✅ FIXED: Use "is None" instead of "not self.db"
             return {"error": "Database not available"}
         
         try:
@@ -228,7 +228,7 @@ class MFACleanupService:
             logger.info(log_message)
             
             # Optionally log to audit collection if it exists
-            if hasattr(self.db, 'audit_logs'):
+            if self.db is not None and hasattr(self.db, 'audit_logs'):  # ✅ FIXED: Use "is not None"
                 audit_log = {
                     "timestamp": datetime.utcnow(),
                     "operation": operation,

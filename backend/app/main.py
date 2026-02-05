@@ -14,17 +14,45 @@ import os
 load_dotenv()
 
 # ================================================
-# Configure logging
+# Configure logging - REDUCED VERBOSITY
 # ================================================
 
 logging.basicConfig(
-    level=logging.WARNING,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.WARNING,  # Only show WARNING and above in console
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console handler
+        logging.FileHandler('app.log', mode='a')  # File handler for detailed logs
+    ]
 )
 
+# Set specific loggers to appropriate levels
 logging.getLogger("uvicorn").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
+logging.getLogger("passlib").setLevel(logging.ERROR)  # Hide passlib warnings
+
+# Your application loggers - set to WARNING to reduce noise
+logging.getLogger("app").setLevel(logging.INFO)
+logging.getLogger("app.scheduler").setLevel(logging.WARNING)
+logging.getLogger("app.crawler").setLevel(logging.WARNING)
+logging.getLogger("app.services").setLevel(logging.WARNING)
+logging.getLogger("app.auth").setLevel(logging.WARNING)  # Reduce auth logs
+logging.getLogger("app.database").setLevel(logging.WARNING)
+logging.getLogger("app.utils").setLevel(logging.WARNING)
+
+# File handler for detailed logs (DEBUG level in file only)
+file_handler = logging.FileHandler('detailed.log')
+file_handler.setLevel(logging.DEBUG)
+file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+# Add file handler to specific loggers for detailed debugging
+logging.getLogger("app").addHandler(file_handler)
+logging.getLogger("app.scheduler").addHandler(file_handler)
+
+# Create logger for this module
+logger = logging.getLogger(__name__)
 
 # ✅ Import database functions (for pages only)
 from .database import (
@@ -50,15 +78,15 @@ def check_email_configuration():
     
     if email_enabled:
         if resend_api_key:
-            print("✅ Email notifications: ENABLED with Resend")
-            print(f"   From email: {resend_from_email or 'onboarding@resend.dev'}")
+            logger.info("Email notifications: ENABLED with Resend")  # Removed ✅ emoji
+            logger.info(f"   From email: {resend_from_email or 'onboarding@resend.dev'}")  # Removed emoji
             return True
         else:
-            print("❌ EMAIL_ENABLED=true but RESEND_API_KEY missing!")
-            print("   Add RESEND_API_KEY to your .env file")
+            logger.warning("EMAIL_ENABLED=true but RESEND_API_KEY missing!")  # Removed ❌ emoji
+            logger.warning("   Add RESEND_API_KEY to your .env file")
             return False
     else:
-        print("ℹ️  Email notifications: DISABLED (EMAIL_ENABLED=false)")
+        logger.info("Email notifications: DISABLED (EMAIL_ENABLED=false)")  # Removed ℹ️ emoji
         return False
 
 # Instantiate scheduler and crawler
@@ -126,21 +154,16 @@ def generate_sequential_name(user_id: str) -> str:
 async def lifespan(app: FastAPI):
     # STARTUP
     print("=" * 60)
-    print("🚀 Starting FreshLense API...")
+    print("Starting FreshLense API...")  # Removed 🚀 emoji
     print("=" * 60)
-    
-    # Silence scheduler and crawler logs
-    logging.getLogger("app.scheduler").setLevel(logging.WARNING)
-    logging.getLogger("app.crawler").setLevel(logging.WARNING)
-    logging.getLogger("app.services").setLevel(logging.WARNING)
     
     # Check SERP API configuration
     serp_api_key = os.getenv("SERPAPI_API_KEY")
     if serp_api_key:
-        print(f"✅ SERP API Key loaded: {serp_api_key[:10]}...")
+        print(f"SERP API Key loaded: {serp_api_key[:10]}...")  # Removed ✅ emoji
     else:
-        print("❌ SERP API Key NOT found in environment")
-        print("💡 Make sure you have a .env file with SERPAPI_API_KEY=your_key")
+        print("SERP API Key NOT found in environment")  # Removed ❌ emoji
+        print("Make sure you have a .env file with SERPAPI_API_KEY=your_key")  # Removed 💡 emoji
     
     # Check email configuration
     email_configured = check_email_configuration()
@@ -148,31 +171,31 @@ async def lifespan(app: FastAPI):
     # Check database connection
     from .database import is_db_available
     if is_db_available():
-        print("✅ Database connection: ACTIVE")
+        print("Database connection: ACTIVE")  # Removed ✅ emoji
     else:
-        print("❌ Database connection: FAILED")
+        print("Database connection: FAILED")  # Removed ❌ emoji
     
     # Start monitoring scheduler
     try:
-        print("\n🔄 Starting monitoring scheduler...")
+        print("\nStarting monitoring scheduler...")  # Removed 🔄 emoji
         if asyncio.iscoroutinefunction(monitoring_scheduler.start):
             await monitoring_scheduler.start()
         else:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, monitoring_scheduler.start)
-        print("✅ Monitoring scheduler started successfully")
+        print("Monitoring scheduler started successfully")  # Removed ✅ emoji
         
         if hasattr(monitoring_scheduler, 'email_enabled'):
             if monitoring_scheduler.email_enabled:
-                print("✅ Scheduler email notifications: ENABLED")
+                print("Scheduler email notifications: ENABLED")  # Removed ✅ emoji
             else:
-                print("❌ Scheduler email notifications: DISABLED")
+                print("Scheduler email notifications: DISABLED")  # Removed ❌ emoji
     except Exception as e:
-        print(f"❌ Error starting monitoring scheduler: {e}")
+        logger.error(f"Error starting monitoring scheduler: {e}")
         raise
 
     print("\n" + "=" * 60)
-    print("✅ FreshLense API is ready!")
+    print("FreshLense API is ready!")  # Removed ✅ emoji
     print("=" * 60)
     
     try:
@@ -180,16 +203,17 @@ async def lifespan(app: FastAPI):
     finally:
         # SHUTDOWN
         print("\n" + "=" * 60)
-        print("🛑 Shutting down FreshLense API...")
+        print("Shutting down FreshLense API...")  # Removed 🛑 emoji
+        print("=" * 60)
         try:
             if asyncio.iscoroutinefunction(monitoring_scheduler.shutdown):
                 await monitoring_scheduler.shutdown()
             else:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, monitoring_scheduler.shutdown)
-            print("✅ Monitoring scheduler stopped")
+            print("Monitoring scheduler stopped")  # Removed ✅ emoji
         except Exception as e:
-            print(f"❌ Error during monitoring_scheduler.shutdown(): {e}")
+            logger.error(f"Error during monitoring_scheduler.shutdown(): {e}")
         print("=" * 60)
 
 # -------------------- Create FastAPI app --------------------
@@ -222,9 +246,9 @@ app.include_router(auth.router)
 @app.get("/api/pages", response_model=List[TrackedPageResponse])
 async def get_my_pages(current_user: dict = Depends(get_current_user)):
     """Get all tracked pages for the current user"""
-    print(f"📄 [MAIN] Fetching pages for user: {current_user['email']}")
+    logger.debug(f"Fetching pages for user: {current_user['email']}")  # Changed to debug
     pages = get_tracked_pages(current_user["_id"])
-    print(f"✅ [MAIN] Found {len(pages)} pages for {current_user['email']}")
+    logger.debug(f"Found {len(pages)} pages for {current_user['email']}")  # Changed to debug
     return [normalize_doc(p) for p in pages]
 
 @app.post("/api/pages", response_model=TrackedPageResponse)
@@ -258,7 +282,7 @@ async def create_page(
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, monitoring_scheduler.schedule_page, new_page)
     except Exception as e:
-        print(f"Failed to schedule page immediately after creation: {e}")
+        logger.error(f"Failed to schedule page immediately after creation: {e}")
 
     return normalize_doc(new_page)
 
@@ -448,15 +472,15 @@ async def test_email_send(request: Request):
         params = {
             "from": f"FreshLense Test <{from_email}>",
             "to": [test_email],
-            "subject": "🧪 FreshLense Email Test",
+            "subject": "FreshLense Email Test",  # Removed 🧪 emoji
             "html": f"""
             <!DOCTYPE html>
             <html>
             <body style="font-family: Arial, sans-serif; padding: 20px;">
-                <h2>🧪 FreshLense Email System Test</h2>
+                <h2>FreshLense Email System Test</h2>
                 <p>If you receive this email, your FreshLense email system is working correctly!</p>
                 <div style="background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                    <p><strong>System Status:</strong> ✅ Operational</p>
+                    <p><strong>System Status:</strong> Operational</p>
                     <p><strong>Test Time:</strong> {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}</p>
                 </div>
                 <p>You will now receive:</p>
@@ -472,7 +496,7 @@ async def test_email_send(request: Request):
 
 If you receive this email, your FreshLense email system is working correctly!
 
-System Status: ✅ Operational
+System Status: Operational
 Test Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
 
 You will now receive:

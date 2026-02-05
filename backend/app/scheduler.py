@@ -24,6 +24,9 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 client = None
 db = None
 
+# Set up logging for this module FIRST
+logger = logging.getLogger(__name__)
+
 try:
     client = MongoClient(MONGO_URI)
     client.admin.command('ping')  # Test the connection
@@ -68,6 +71,7 @@ try:
 
 except (ConnectionFailure, ServerSelectionTimeoutError) as e:
     print(f"❌ MongoDB connection failed: {e}")
+    logger.error(f"MongoDB connection failed: {e}")
     client = None
     db = None
 
@@ -120,6 +124,7 @@ def get_user_by_id(user_id):
         return user
     except Exception as e:
         print(f"Error getting user by ID: {e}")
+        logger.error(f"Error getting user by ID: {e}")
         return None
 
 
@@ -197,7 +202,8 @@ def get_tracked_page(page_id: str):
     try:
         page = pages_collection.find_one({"_id": ObjectId(page_id)})
         return page
-    except:
+    except Exception as e:
+        logger.error(f"Error getting tracked page {page_id}: {e}")
         return None
 
 
@@ -269,7 +275,8 @@ def update_tracked_page(page_id: str, update_data: dict) -> bool:
     try:
         result = pages_collection.update_one({"_id": ObjectId(page_id)}, {"$set": update_data_copy})
         return result.modified_count > 0
-    except:
+    except Exception as e:
+        logger.error(f"Error updating tracked page {page_id}: {e}")
         return False
 
 
@@ -293,7 +300,8 @@ def delete_tracked_page(page_id: str) -> bool:
             )
         
         return result.deleted_count > 0
-    except:
+    except Exception as e:
+        logger.error(f"Error deleting tracked page {page_id}: {e}")
         return False
 
 
@@ -304,8 +312,7 @@ def create_page_version(page_id: str, text_content: str, url: str, html_content:
         return None
     
     # ✅ ADD SMART VERSIONING FIELDS
-    from .services.versioning_service import VersioningService
-    versioning_service = VersioningService()
+    versioning_service = VersioningService(db)
     
     version = {
         "page_id": ObjectId(page_id),
@@ -331,7 +338,8 @@ def create_page_version(page_id: str, text_content: str, url: str, html_content:
         result = versions_collection.insert_one(version)
         version["_id"] = result.inserted_id
         return version
-    except:
+    except Exception as e:
+        logger.error(f"Error creating page version for page {page_id}: {e}")
         return None
 
 
@@ -342,7 +350,8 @@ def get_page_versions(page_id: str, limit: int = 10):
     try:
         versions = versions_collection.find({"page_id": ObjectId(page_id)}).sort("timestamp", DESCENDING).limit(limit)
         return list(versions)
-    except:
+    except Exception as e:
+        logger.error(f"Error getting page versions for {page_id}: {e}")
         return []
 
 
@@ -367,7 +376,8 @@ def create_change_log(change_data: dict):
     try:
         result = changes_collection.insert_one(change_data_copy)
         return str(result.inserted_id)
-    except:
+    except Exception as e:
+        logger.error(f"Error creating change log: {e}")
         return None
 
 
@@ -378,7 +388,8 @@ def get_change_logs_for_page(page_id: str, limit: int = 20):
     try:
         changes = changes_collection.find({"page_id": ObjectId(page_id)}).sort("timestamp", DESCENDING).limit(limit)
         return list(changes)
-    except:
+    except Exception as e:
+        logger.error(f"Error getting change logs for page {page_id}: {e}")
         return []
 
 
@@ -403,7 +414,8 @@ def get_change_logs_for_user(user_id, limit: int = 20):
     try:
         changes = changes_collection.find({"user_id": user_id}).sort("timestamp", DESCENDING).limit(limit)
         return list(changes)
-    except:
+    except Exception as e:
+        logger.error(f"Error getting change logs for user {user_id}: {e}")
         return []
 
 
@@ -415,7 +427,8 @@ def get_all_active_pages():
     try:
         pages = pages_collection.find({"is_active": True})
         return list(pages)
-    except:
+    except Exception as e:
+        logger.error(f"Error getting all active pages: {e}")
         return []
 
 
@@ -434,7 +447,8 @@ def get_pages_due_for_check():
             ]
         })
         return list(pages)
-    except:
+    except Exception as e:
+        logger.error(f"Error getting pages due for check: {e}")
         return []
 
 
@@ -457,7 +471,8 @@ def get_latest_page_version(page_id: str):
             return None  # Only one version exists, no comparison possible
         else:
             return None  # No versions exist
-    except:
+    except Exception as e:
+        logger.error(f"Error getting latest page version for {page_id}: {e}")
         return None
 
 
@@ -507,9 +522,6 @@ def safe_cleanup_old_audit_logs(days_to_keep: int = 90) -> int:
 # ---------------- MonitoringScheduler Class ----------------
 from .crawler import ContentFetcher
 
-# Set up logging for scheduler module
-logger = logging.getLogger(__name__)
-
 class MonitoringScheduler:
     """Background scheduler for monitoring webpage changes with smart versioning"""
     
@@ -525,8 +537,8 @@ class MonitoringScheduler:
         self.task: Optional[asyncio.Task] = None
         self._loop = None
         self.content_fetcher = ContentFetcher()  # Initialize the content fetcher
-        # ✅ ADD SMART VERSIONING SERVICE
-        self.versioning_service = VersioningService()
+        # ✅ ADD SMART VERSIONING SERVICE WITH DATABASE CONNECTION
+        self.versioning_service = VersioningService(db)
         
         # ✅ EMAIL CONFIGURATION
         self.email_enabled = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
