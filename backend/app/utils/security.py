@@ -1,4 +1,3 @@
-# backend/app/utils/security.py
 from fastapi import HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta
@@ -8,6 +7,7 @@ from passlib.context import CryptContext
 import os
 from dotenv import load_dotenv
 import logging
+from bson import ObjectId
 
 load_dotenv()
 
@@ -119,9 +119,9 @@ def get_token_expiry_info(token: str) -> Dict[str, Any]:
     
     return {"valid": False, "expires_at": None, "time_remaining_seconds": 0}
 
-# ✅ ADDED: get_current_user dependency function
+# ✅ ADDED: get_current_user dependency function - UPDATED
 async def get_current_user(token: str = Depends(oauth2_scheme)):
-    """Get current user from JWT token"""
+    """Get current user from JWT token - Returns User model object"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -130,6 +130,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
     
     # Import here to avoid circular imports
     from ..database import get_user_by_email
+    from ..models import User as UserModel  # Import the User model
     
     try:
         payload = decode_access_token(token)
@@ -138,32 +139,82 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             
         email: str = payload.get("sub")
         if not email:
-            logger.warning(f"Token missing 'sub' claim")  # Changed to warning
+            logger.warning(f"Token missing 'sub' claim")
             raise credentials_exception
         
-        logger.debug(f"Token validated for user: {email}")  # Changed to debug
+        logger.debug(f"Token validated for user: {email}")
         
     except jwt.ExpiredSignatureError:
-        logger.warning(f"Token expired")  # Changed to warning
+        logger.warning(f"Token expired")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
     except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid token: {e}")  # Changed to warning
+        logger.warning(f"Invalid token: {e}")
         raise credentials_exception
     except Exception as e:
-        logger.error(f"Unexpected token error: {e}")  # Keep error for actual errors
+        logger.error(f"Unexpected token error: {e}")
         raise credentials_exception
 
-    user = get_user_by_email(email)
-    if not user:
-        logger.warning(f"User not found for email: {email}")  # Changed to warning
+    # Get user as dictionary from database
+    user_dict = get_user_by_email(email)
+    if not user_dict:
+        logger.warning(f"User not found for email: {email}")
         raise credentials_exception
     
-    logger.debug(f"User authenticated: {email}")  # Changed to debug
-    return user
+    # ✅ CRITICAL FIX: Convert MongoDB document to User model
+    # Ensure all required fields are present and properly formatted
+    
+    # Handle _id field - convert ObjectId to string for id field
+    if "_id" in user_dict:
+        user_dict["id"] = user_dict["_id"]  # Keep as ObjectId for model compatibility
+        # Don't delete _id as the model expects it via alias
+    
+    # Ensure all required User model fields are present
+    required_fields = ["email", "hashed_password"]
+    for field in required_fields:
+        if field not in user_dict:
+            logger.error(f"User missing required field: {field}")
+            raise credentials_exception
+    
+    # Set default values for optional fields if missing
+    if "created_at" not in user_dict:
+        user_dict["created_at"] = datetime.utcnow()
+    
+    if "notification_preferences" not in user_dict:
+        user_dict["notification_preferences"] = {
+            "email_alerts": True,
+            "frequency": "immediately"
+        }
+    
+    # MFA fields defaults
+    mfa_fields = ["mfa_enabled", "mfa_setup_completed"]
+    for field in mfa_fields:
+        if field not in user_dict:
+            user_dict[field] = False
+    
+    # Soft delete protection fields
+    delete_fields = ["is_deleted", "deleted_at", "deleted_by"]
+    for field in delete_fields:
+        if field not in user_dict:
+            if field == "is_deleted":
+                user_dict[field] = False
+            else:
+                user_dict[field] = None
+    
+    try:
+        # Create User model object
+        user = UserModel(**user_dict)
+        logger.debug(f"User model created successfully for: {email}")
+        return user
+    except Exception as e:
+        logger.error(f"Failed to create User model for {email}: {e}")
+        logger.error(f"User dict keys: {list(user_dict.keys())}")
+        # Fallback: return the dictionary if model creation fails
+        logger.warning(f"Falling back to dictionary for user: {email}")
+        return user_dict
 
 # Optional: Token blacklist for logout functionality (if needed)
 token_blacklist = set()

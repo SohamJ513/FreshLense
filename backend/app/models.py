@@ -173,6 +173,26 @@ class TrackedPage(TrackedPageBase):
         ser_json_by_alias=True,
     )
 
+# ✅ ADDED: Tracked Page Update Model
+class TrackedPageUpdate(BaseModel):
+    """Schema for updating tracked page details"""
+    display_name: Optional[str] = None
+    check_interval_hours: Optional[int] = None
+    
+    @field_validator('check_interval_hours')
+    @classmethod
+    def validate_interval(cls, v):
+        if v is not None and v < 1:
+            raise ValueError('Check interval must be at least 1 hour')
+        if v is not None and v > 168:  # 1 week
+            raise ValueError('Check interval cannot exceed 168 hours (1 week)')
+        return v
+    
+    model_config = ConfigDict(
+        json_encoders={ObjectId: str},
+        extra='forbid'  # Don't allow extra fields
+    )
+
 # -------------------------------
 # Page Version Models - UPDATED WITH SMART VERSIONING
 # -------------------------------

@@ -64,10 +64,40 @@ from .scheduler import MonitoringScheduler
 from .crawler import ContentFetcher
 
 # ✅ Import routers
-from .routers import fact_check, auth
+from .routers import fact_check, auth, pages  # ✅ ADDED: Import pages router
 
 # ✅ Import security utilities
 from .utils.security import get_current_user
+from .models import User as UserModel  # Import User model
+
+# -------------------- Helper function to get user ID --------------------
+def get_user_id_from_current_user(current_user) -> str:
+    """Extract user ID from current_user (handles both dict and User object)"""
+    if isinstance(current_user, dict):
+        # Dictionary format (fallback)
+        if '_id' in current_user:
+            return str(current_user['_id'])
+        elif 'id' in current_user:
+            return str(current_user['id'])
+    elif hasattr(current_user, '_id') and current_user._id is not None:
+        # User model with _id attribute
+        return str(current_user._id)
+    elif hasattr(current_user, 'id') and current_user.id is not None:
+        # User model with id attribute
+        return str(current_user.id)
+    else:
+        raise ValueError(f"Cannot extract user ID from current_user. Type: {type(current_user)}")
+
+def get_user_email_from_current_user(current_user) -> str:
+    """Extract email from current_user (handles both dict and User object)"""
+    if isinstance(current_user, dict):
+        # Dictionary format (fallback)
+        return current_user.get('email', 'unknown@email.com')
+    elif hasattr(current_user, 'email'):
+        # User model with email attribute
+        return current_user.email
+    else:
+        return 'unknown@email.com'
 
 # -------------------- Email Configuration Check --------------------
 def check_email_configuration():
@@ -78,15 +108,15 @@ def check_email_configuration():
     
     if email_enabled:
         if resend_api_key:
-            logger.info("Email notifications: ENABLED with Resend")  # Removed ✅ emoji
-            logger.info(f"   From email: {resend_from_email or 'onboarding@resend.dev'}")  # Removed emoji
+            logger.info("Email notifications: ENABLED with Resend")
+            logger.info(f"   From email: {resend_from_email or 'onboarding@resend.dev'}")
             return True
         else:
-            logger.warning("EMAIL_ENABLED=true but RESEND_API_KEY missing!")  # Removed ❌ emoji
+            logger.warning("EMAIL_ENABLED=true but RESEND_API_KEY missing!")
             logger.warning("   Add RESEND_API_KEY to your .env file")
             return False
     else:
-        logger.info("Email notifications: DISABLED (EMAIL_ENABLED=false)")  # Removed ℹ️ emoji
+        logger.info("Email notifications: DISABLED (EMAIL_ENABLED=false)")
         return False
 
 # Instantiate scheduler and crawler
@@ -154,16 +184,16 @@ def generate_sequential_name(user_id: str) -> str:
 async def lifespan(app: FastAPI):
     # STARTUP
     print("=" * 60)
-    print("Starting FreshLense API...")  # Removed 🚀 emoji
+    print("Starting FreshLense API...")
     print("=" * 60)
     
     # Check SERP API configuration
     serp_api_key = os.getenv("SERPAPI_API_KEY")
     if serp_api_key:
-        print(f"SERP API Key loaded: {serp_api_key[:10]}...")  # Removed ✅ emoji
+        print(f"SERP API Key loaded: {serp_api_key[:10]}...")
     else:
-        print("SERP API Key NOT found in environment")  # Removed ❌ emoji
-        print("Make sure you have a .env file with SERPAPI_API_KEY=your_key")  # Removed 💡 emoji
+        print("SERP API Key NOT found in environment")
+        print("Make sure you have a .env file with SERPAPI_API_KEY=your_key")
     
     # Check email configuration
     email_configured = check_email_configuration()
@@ -171,31 +201,31 @@ async def lifespan(app: FastAPI):
     # Check database connection
     from .database import is_db_available
     if is_db_available():
-        print("Database connection: ACTIVE")  # Removed ✅ emoji
+        print("Database connection: ACTIVE")
     else:
-        print("Database connection: FAILED")  # Removed ❌ emoji
+        print("Database connection: FAILED")
     
     # Start monitoring scheduler
     try:
-        print("\nStarting monitoring scheduler...")  # Removed 🔄 emoji
+        print("\nStarting monitoring scheduler...")
         if asyncio.iscoroutinefunction(monitoring_scheduler.start):
             await monitoring_scheduler.start()
         else:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, monitoring_scheduler.start)
-        print("Monitoring scheduler started successfully")  # Removed ✅ emoji
+        print("Monitoring scheduler started successfully")
         
         if hasattr(monitoring_scheduler, 'email_enabled'):
             if monitoring_scheduler.email_enabled:
-                print("Scheduler email notifications: ENABLED")  # Removed ✅ emoji
+                print("Scheduler email notifications: ENABLED")
             else:
-                print("Scheduler email notifications: DISABLED")  # Removed ❌ emoji
+                print("Scheduler email notifications: DISABLED")
     except Exception as e:
         logger.error(f"Error starting monitoring scheduler: {e}")
         raise
 
     print("\n" + "=" * 60)
-    print("FreshLense API is ready!")  # Removed ✅ emoji
+    print("FreshLense API is ready!")
     print("=" * 60)
     
     try:
@@ -203,7 +233,7 @@ async def lifespan(app: FastAPI):
     finally:
         # SHUTDOWN
         print("\n" + "=" * 60)
-        print("Shutting down FreshLense API...")  # Removed 🛑 emoji
+        print("Shutting down FreshLense API...")
         print("=" * 60)
         try:
             if asyncio.iscoroutinefunction(monitoring_scheduler.shutdown):
@@ -211,7 +241,7 @@ async def lifespan(app: FastAPI):
             else:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, monitoring_scheduler.shutdown)
-            print("Monitoring scheduler stopped")  # Removed ✅ emoji
+            print("Monitoring scheduler stopped")
         except Exception as e:
             logger.error(f"Error during monitoring_scheduler.shutdown(): {e}")
         print("=" * 60)
@@ -242,27 +272,35 @@ app.add_middleware(
 # ✅ All auth endpoints are in auth.router
 app.include_router(auth.router)
 
+# ✅ Include pages router for page management
+app.include_router(pages.router)
+
 # -------------------- Tracked Pages Routes --------------------
 @app.get("/api/pages", response_model=List[TrackedPageResponse])
-async def get_my_pages(current_user: dict = Depends(get_current_user)):
+async def get_my_pages(current_user = Depends(get_current_user)):
     """Get all tracked pages for the current user"""
-    logger.debug(f"Fetching pages for user: {current_user['email']}")  # Changed to debug
-    pages = get_tracked_pages(current_user["_id"])
-    logger.debug(f"Found {len(pages)} pages for {current_user['email']}")  # Changed to debug
-    return [normalize_doc(p) for p in pages]
+    user_id = get_user_id_from_current_user(current_user)
+    user_email = get_user_email_from_current_user(current_user)
+    
+    logger.debug(f"Fetching pages for user: {user_email}")
+    pages_list = get_tracked_pages(user_id)
+    logger.debug(f"Found {len(pages_list)} pages for {user_email}")
+    return [normalize_doc(p) for p in pages_list]
 
 @app.post("/api/pages", response_model=TrackedPageResponse)
 async def create_page(
     page: TrackedPageCreate, 
     request: Request,
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
+    user_id = get_user_id_from_current_user(current_user)
+    
     # Check if request is from Chrome extension
     is_extension = request.headers.get("x-request-source") == "chrome-extension"
     
     # Generate sequential name for extension requests without display name
     if is_extension and (not page.display_name or page.display_name.strip() == ""):
-        display_name = generate_sequential_name(current_user["_id"])
+        display_name = generate_sequential_name(user_id)
     else:
         display_name = page.display_name or page.url
     
@@ -272,7 +310,7 @@ async def create_page(
         "check_interval_minutes": page.check_interval_minutes
     }
     
-    new_page = create_tracked_page(page_data, current_user["_id"])
+    new_page = create_tracked_page(page_data, user_id)
     
     # Schedule page
     try:
@@ -287,15 +325,17 @@ async def create_page(
     return normalize_doc(new_page)
 
 @app.delete("/api/pages/{page_id}")
-async def delete_page(page_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_page(page_id: str, current_user = Depends(get_current_user)):
     """Delete a tracked page"""
+    user_id = get_user_id_from_current_user(current_user)
+    
     try:
         ObjectId(page_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
     
     page = get_tracked_page(page_id)
-    if not page or page["user_id"] != current_user["_id"]:
+    if not page or str(page["user_id"]) != user_id:  # ← FIXED
         raise HTTPException(status_code=404, detail="Page not found")
     
     success = delete_tracked_page(page_id)
@@ -307,10 +347,11 @@ async def delete_page(page_id: str, current_user: dict = Depends(get_current_use
 @app.get("/api/pages/by-url", response_model=TrackedPageResponse)
 async def get_page_by_url(
     url: str = Query(..., description="URL to check"),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Check if a page is already tracked by its URL"""
-    page = get_tracked_page_by_url(url, current_user["_id"])
+    user_id = get_user_id_from_current_user(current_user)
+    page = get_tracked_page_by_url(url, user_id)
     if not page:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -319,32 +360,37 @@ async def get_page_by_url(
     return normalize_doc(page)
 
 @app.get("/api/pages/{page_id}", response_model=TrackedPageResponse)
-async def get_page(page_id: str, current_user: dict = Depends(get_current_user)):
+async def get_page(page_id: str, current_user = Depends(get_current_user)):
+    user_id = get_user_id_from_current_user(current_user)
+    
     try:
         ObjectId(page_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
     page = get_tracked_page(page_id)
-    if not page or page["user_id"] != current_user["_id"]:
+    if not page or str(page["user_id"]) != user_id:  # ← FIXED
         raise HTTPException(status_code=404, detail="Page not found")
     return normalize_doc(page)
 
 @app.get("/api/pages/{page_id}/versions", response_model=List[PageVersionResponse])
-async def get_versions(page_id: str, current_user: dict = Depends(get_current_user)):
+async def get_versions(page_id: str, current_user = Depends(get_current_user)):
+    user_id = get_user_id_from_current_user(current_user)
+    
     try:
         ObjectId(page_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
     page = get_tracked_page(page_id)
-    if not page or page["user_id"] != current_user["_id"]:
+    if not page or str(page["user_id"]) != user_id:  # ← FIXED
         raise HTTPException(status_code=404, detail="Page not found")
     versions = get_page_versions(page_id)
     return [normalize_doc(v) for v in versions]
 
 # -------------------- Change Logs Routes --------------------
 @app.get("/api/changes", response_model=List[ChangeLogResponse])
-async def get_my_changes(current_user: dict = Depends(get_current_user)):
-    changes = get_change_logs_for_user(current_user["_id"])
+async def get_my_changes(current_user = Depends(get_current_user)):
+    user_id = get_user_id_from_current_user(current_user)
+    changes = get_change_logs_for_user(user_id)
     return [normalize_doc(c) for c in changes]
 
 # -------------------- Fact Check Routes --------------------
@@ -355,7 +401,7 @@ app.include_router(fact_check.router, dependencies=[Depends(get_current_user)])
 @app.post("/api/crawl")
 async def crawl_url(
     url: str = Query(..., description="URL to crawl"),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Trigger a manual crawl for a given URL (no DB save)"""
     try:
@@ -376,15 +422,17 @@ async def crawl_url(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/crawl/{page_id}")
-async def crawl_page_by_id(page_id: str, current_user: dict = Depends(get_current_user)):
+async def crawl_page_by_id(page_id: str, current_user = Depends(get_current_user)):
     """Trigger a manual crawl for a tracked page by its ID and store results"""
+    user_id = get_user_id_from_current_user(current_user)
+    
     try:
         ObjectId(page_id)
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
 
     page = get_tracked_page(page_id)
-    if not page or page["user_id"] != current_user["_id"]:
+    if not page or str(page["user_id"]) != user_id:  # ← FIXED (MAIN FIX)
         raise HTTPException(status_code=404, detail="Page not found")
 
     try:
@@ -412,7 +460,7 @@ async def crawl_page_by_id(page_id: str, current_user: dict = Depends(get_curren
             update_data["last_change_detected"] = datetime.utcnow()
             create_change_log({
                 "page_id": ObjectId(page_id),
-                "user_id": page["user_id"],
+                "user_id": user_id,
                 "type": "manual_crawl",
                 "timestamp": datetime.utcnow(),
                 "description": "Content changed on manual crawl"
@@ -472,7 +520,7 @@ async def test_email_send(request: Request):
         params = {
             "from": f"FreshLense Test <{from_email}>",
             "to": [test_email],
-            "subject": "FreshLense Email Test",  # Removed 🧪 emoji
+            "subject": "FreshLense Email Test",
             "html": f"""
             <!DOCTYPE html>
             <html>

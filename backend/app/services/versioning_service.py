@@ -3,10 +3,25 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from bson import ObjectId
 
+# Import collections directly from database
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Try to import database collections
+try:
+    from database import versions_collection, pages_collection
+    print("✅ Successfully imported database collections for versioning service")
+except ImportError as e:
+    print(f"⚠️ Could not import database collections: {e}")
+    # These will be set later by set_collections() method
+    versions_collection = None
+    pages_collection = None
+
+
 class VersioningService:
-    def __init__(self, database=None):
+    def __init__(self):
         self.diff_service = None
-        self.database = database
         
         # Lazy import of diff_service to avoid circular imports
         self._ensure_diff_service()
@@ -17,19 +32,14 @@ class VersioningService:
             from .diff_service import DiffService
             self.diff_service = DiffService()
     
-    def set_database(self, database):
-        """Set database connection"""
-        self.database = database
-        self._ensure_database_collections()
-    
-    def _ensure_database_collections(self):
-        """Ensure we have access to database collections"""
-        if self.database is None:  # ✅ FIXED: Use "is None" instead of "not self.database"
-            return
-        
+    def set_collections(self, versions_coll, pages_coll):
+        """Set collection references directly"""
         global versions_collection, pages_collection
-        versions_collection = self.database.get('page_versions', None)
-        pages_collection = self.database.get('tracked_pages', None)
+        versions_collection = versions_coll
+        pages_collection = pages_coll
+        print(f"✅ Versioning service collections set: "
+              f"versions={versions_collection is not None}, "
+              f"pages={pages_collection is not None}")
     
     def calculate_content_hash(self, text: str) -> str:
         """Calculate SHA256 hash of content for quick comparison"""
@@ -186,9 +196,9 @@ class VersioningService:
         
         Returns: version_id if saved, None if skipped
         """
-        # Check if database is available
-        if self.database is None or versions_collection is None or pages_collection is None:  # ✅ FIXED
-            print("❌ Database not available for versioning")
+        # Check if database collections are available
+        if versions_collection is None or pages_collection is None:
+            print("❌ Database collections not available for versioning")
             return None
         
         # Get the latest version
@@ -254,8 +264,8 @@ class VersioningService:
     
     def prune_old_versions(self, page_id: str, config: Optional[Dict] = None):
         """Remove old, insignificant versions"""
-        # Check if database is available
-        if self.database is None or versions_collection is None:  # ✅ FIXED
+        # Check if database collection is available
+        if versions_collection is None:
             return 0
         
         default_config = {
@@ -321,7 +331,3 @@ class VersioningService:
             print(f"🧹 Pruned {deleted_count} old versions for page {page_id}")
         
         return deleted_count
-
-# Global collections (will be set by scheduler.py)
-versions_collection = None
-pages_collection = None

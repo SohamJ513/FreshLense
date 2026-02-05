@@ -11,7 +11,7 @@ import {
   CardContent,
   Button
 } from '@mui/material';
-import { pagesAPI, TrackedPage, crawlAPI } from '../../services/api';
+import { pagesAPI, TrackedPage, crawlAPI, UpdatedPageResponse } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import AddPageForm from './AddPageForm';
@@ -111,10 +111,44 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handlePageUpdated = (updatedPage: TrackedPage) => {
+  const handlePageUpdated = (updatedPage: TrackedPage | UpdatedPageResponse) => {
+    // Convert UpdatedPageResponse to TrackedPage format if needed
+    const convertedPage: TrackedPage = 'check_interval_hours' in updatedPage 
+      ? {
+          id: updatedPage.id,
+          user_id: '', // We'll fill this from existing page
+          url: updatedPage.url,
+          display_name: updatedPage.display_name,
+          check_interval_minutes: updatedPage.check_interval_hours * 60,
+          is_active: updatedPage.status === 'active',
+          created_at: updatedPage.created_at,
+          last_checked: updatedPage.last_checked,
+          last_change_detected: updatedPage.last_change_detected,
+          current_version_id: updatedPage.current_version_id,
+        }
+      : updatedPage;
+    
     setPages((prev) =>
-      prev.map((page) => (page.id === updatedPage.id ? updatedPage : page))
+      prev.map((page) => {
+        if (page.id === convertedPage.id) {
+          return {
+            ...page,
+            display_name: convertedPage.display_name,
+            check_interval_minutes: convertedPage.check_interval_minutes,
+            last_checked: convertedPage.last_checked || page.last_checked,
+            last_change_detected: convertedPage.last_change_detected || page.last_change_detected,
+            current_version_id: convertedPage.current_version_id || page.current_version_id,
+          };
+        }
+        return page;
+      })
     );
+    
+    setSnackbar({
+      open: true,
+      message: 'Page updated successfully!',
+      severity: 'success',
+    });
   };
 
   const handleCrawl = async (pageId: string) => {

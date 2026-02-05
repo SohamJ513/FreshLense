@@ -13,7 +13,7 @@ import resend  # ✅ ADD RESEND IMPORT
 # Import our new safe cleanup services
 from .services.mfa_cleanup_service import mfa_cleanup_service
 from .services.audit_service import audit_service
-# ✅ ADD NEW IMPORT
+# ✅ FIXED IMPORT: Remove leading dot
 from .services.versioning_service import VersioningService
 
 # Password hashing
@@ -312,7 +312,9 @@ def create_page_version(page_id: str, text_content: str, url: str, html_content:
         return None
     
     # ✅ ADD SMART VERSIONING FIELDS
-    versioning_service = VersioningService(db)
+    # Create versioning service and set collections
+    versioning_service = VersioningService()
+    versioning_service.set_collections(versions_collection, pages_collection)
     
     version = {
         "page_id": ObjectId(page_id),
@@ -537,8 +539,14 @@ class MonitoringScheduler:
         self.task: Optional[asyncio.Task] = None
         self._loop = None
         self.content_fetcher = ContentFetcher()  # Initialize the content fetcher
-        # ✅ ADD SMART VERSIONING SERVICE WITH DATABASE CONNECTION
-        self.versioning_service = VersioningService(db)
+        # ✅ FIXED: Create versioning service without database parameter
+        self.versioning_service = VersioningService()
+        # ✅ FIXED: Set collections after creating the service
+        # ✅ FIXED: Change from "if versions_collection and pages_collection:" to "if versions_collection is not None and pages_collection is not None:"
+        if versions_collection is not None and pages_collection is not None:
+            self.versioning_service.set_collections(versions_collection, pages_collection)
+        else:
+            logger.warning("Database collections not available during scheduler initialization")
         
         # ✅ EMAIL CONFIGURATION
         self.email_enabled = os.getenv("EMAIL_ENABLED", "true").lower() == "true"

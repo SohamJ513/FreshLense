@@ -1,5 +1,5 @@
 // frontend/src/services/api.ts
-import axios, { AxiosError, AxiosHeaders } from 'axios';
+import axios, { AxiosError, AxiosHeaders, AxiosResponse } from 'axios';
 import { MFALoginResponse } from '../types/mfa';
 
 const API_BASE_URL = 'http://localhost:8000/api';
@@ -276,6 +276,24 @@ export interface DeleteResponse {
   message: string;
 }
 
+// ✅ ADDED: Page Update Types
+export interface PageUpdateData {
+  display_name?: string;
+  check_interval_hours?: number;
+}
+
+export interface UpdatedPageResponse {
+  id: string;
+  url: string;
+  display_name: string;
+  check_interval_hours: number;
+  status: string;
+  last_checked: string | null;
+  created_at: string;
+  last_change_detected: string | null;
+  current_version_id: string | null;
+}
+
 // Forgot Password Types
 export interface ForgotPasswordResponse {
   message: string;
@@ -377,6 +395,12 @@ export const pagesAPI = {
     check_interval_minutes?: number 
   }) => api.post<TrackedPage>('/pages', pageData),
   
+  // ✅ ADDED: Update page endpoint - Fixed return type
+  update: (id: string, pageData: PageUpdateData) => {
+    console.log('[Pages] Updating page:', id, pageData);
+    return api.put<UpdatedPageResponse>(`/pages/${id}`, pageData);
+  },
+  
   delete: (id: string) => api.delete<DeleteResponse>(`/pages/${id}`),
   
   getVersions: (pageId: string) => api.get<PageVersion[]>(`/pages/${pageId}/versions`),
@@ -412,6 +436,12 @@ export const mfaAPI = {
   getStatus: authAPI.getMFAStatus,
   setup: authAPI.setupMFA,
   disable: authAPI.disableMFA,
+};
+
+// ✅ ADDED: Export updatePage function for direct usage - FIXED return type
+export const updatePage = async (pageId: string, data: PageUpdateData): Promise<UpdatedPageResponse> => {
+  const response = await pagesAPI.update(pageId, data);
+  return response.data; // Extract the data from AxiosResponse
 };
 
 // ---------------- Utility Functions ----------------

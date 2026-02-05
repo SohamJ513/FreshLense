@@ -150,3 +150,21 @@ class ChangeMetrics(BaseModel):
     change_percentage: Optional[float] = None
     lines_added: Optional[int] = None
     lines_removed: Optional[int] = None
+
+# ✅ ADDED: Page Update schema for edit functionality
+class PageUpdate(BaseModel):
+    """Schema for updating page details"""
+    display_name: Optional[str] = None
+    check_interval_hours: Optional[int] = None
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+
+# ✅ ADDED: Page Create schema (if not existing)
+class PageCreate(BaseModel):
+    """Schema for creating a new page"""
+    url: str
+    display_name: Optional[str] = None
+    check_interval_hours: Optional[int] = 24  # Default 1 day

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Table,
   TableBody,
@@ -14,6 +14,12 @@ import {
   CircularProgress,
   Typography,
   Box,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  MenuItem,
 } from "@mui/material";
 import {
   Delete as DeleteIcon,
@@ -25,7 +31,7 @@ import {
   FactCheck as FactCheckIcon,
 } from "@mui/icons-material";
 import { useNavigate } from "react-router-dom";
-import { TrackedPage } from "../../services/api";
+import { TrackedPage, updatePage, PageUpdateData, UpdatedPageResponse } from "../../services/api";
 
 interface PageListProps {
   pages: TrackedPage[];
@@ -45,14 +51,21 @@ const PageList: React.FC<PageListProps> = ({
   deletingPages = new Set(),
 }) => {
   const navigate = useNavigate();
+  const [editingPage, setEditingPage] = useState<TrackedPage | null>(null);
+  const [editFormData, setEditFormData] = useState<PageUpdateData>({
+    display_name: "",
+    check_interval_hours: 24,
+  });
+  const [editLoading, setEditLoading] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'Never';
     const date = new Date(dateString);
     return date.toLocaleDateString('en-GB', {
       day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
+      month: 'short',
+      year: '2-digit'
     });
   };
 
@@ -77,6 +90,7 @@ const PageList: React.FC<PageListProps> = ({
           size="small" 
           color="default"
           icon={<WarningIcon />}
+          sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
         />
       );
     }
@@ -89,6 +103,7 @@ const PageList: React.FC<PageListProps> = ({
             size="small" 
             color="success"
             icon={<CheckCircleIcon />}
+            sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
           />
         </Tooltip>
       );
@@ -101,6 +116,7 @@ const PageList: React.FC<PageListProps> = ({
           size="small" 
           color="primary"
           icon={<ScheduleIcon />}
+          sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
         />
       );
     }
@@ -111,6 +127,7 @@ const PageList: React.FC<PageListProps> = ({
         size="small" 
         color="warning"
         icon={<ScheduleIcon />}
+        sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
       />
     );
   };
@@ -120,9 +137,82 @@ const PageList: React.FC<PageListProps> = ({
     return !!page.current_version_id;
   };
 
+  // Handle edit button click
+  const handleEditClick = (page: TrackedPage) => {
+    setEditingPage(page);
+    setEditFormData({
+      display_name: page.display_name || "",
+      check_interval_hours: Math.round(page.check_interval_minutes / 60),
+    });
+    setEditError(null);
+  };
+
+  // Handle edit form submission
+  const handleEditSubmit = async () => {
+    if (!editingPage) return;
+
+    setEditLoading(true);
+    setEditError(null);
+
+    try {
+      const updatedPageResponse: UpdatedPageResponse = await updatePage(editingPage.id, editFormData);
+      
+      // Convert UpdatedPageResponse to TrackedPage format
+      const updatedPage: TrackedPage = {
+        id: updatedPageResponse.id,
+        user_id: editingPage.user_id, // Preserve from original
+        url: updatedPageResponse.url,
+        display_name: updatedPageResponse.display_name,
+        check_interval_minutes: updatedPageResponse.check_interval_hours * 60,
+        is_active: updatedPageResponse.status === 'active',
+        created_at: updatedPageResponse.created_at,
+        last_checked: updatedPageResponse.last_checked,
+        last_change_detected: updatedPageResponse.last_change_detected,
+        current_version_id: updatedPageResponse.current_version_id,
+      };
+      
+      onPageUpdated(updatedPage);
+      setEditingPage(null);
+    } catch (err: any) {
+      setEditError(err.response?.data?.detail || 'Failed to update page');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // Interval options for the select
+  const intervalOptions = [
+    { value: 1, label: '1 hour' },
+    { value: 6, label: '6 hours' },
+    { value: 12, label: '12 hours' },
+    { value: 24, label: '1 day' },
+    { value: 72, label: '3 days' },
+    { value: 168, label: '1 week' },
+  ];
+
+  // Get domain for shorter display
+  const getShortUrl = (url: string): string => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname.replace('www.', '');
+    } catch {
+      return url.length > 40 ? url.substring(0, 37) + '...' : url;
+    }
+  };
+
+  // Get path for tooltip
+  const getUrlPath = (url: string): string => {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.pathname + urlObj.search;
+    } catch {
+      return '';
+    }
+  };
+
   if (pages.length === 0) {
     return (
-      <Paper sx={{ p: 4, textAlign: 'center' }}>
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
         <Typography variant="h6" color="text.secondary">
           No pages being monitored
         </Typography>
@@ -134,211 +224,511 @@ const PageList: React.FC<PageListProps> = ({
   }
 
   return (
-    <TableContainer 
-      component={Paper} 
-      elevation={2}
-      sx={{ 
-        maxWidth: '100%',
-        overflow: 'auto'
-      }}
-    >
-      <Table sx={{ 
-        tableLayout: 'fixed',
-        minWidth: 1000 // Ensures proper minimum width
-      }}>
-        <TableHead>
-          <TableRow>
-            {/* ✅ Optimized column distribution */}
-            <TableCell sx={{ width: '35%', minWidth: 250 }}><strong>URL</strong></TableCell>
-            <TableCell sx={{ width: '15%', minWidth: 120 }}><strong>Display Name</strong></TableCell>
-            <TableCell sx={{ width: '12%', minWidth: 100 }}><strong>Status</strong></TableCell>
-            <TableCell sx={{ width: '15%', minWidth: 140 }}><strong>Last Checked</strong></TableCell>
-            <TableCell sx={{ width: '8%', minWidth: 80 }}><strong>Interval</strong></TableCell>
-            <TableCell align="right" sx={{ width: '15%', minWidth: 180 }}><strong>Actions</strong></TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {pages.map((page) => (
-            <TableRow 
-              key={page.id}
-              sx={{
-                '&:hover': {
-                  backgroundColor: 'action.hover',
-                },
-                opacity: page.is_active ? 1 : 0.6,
-              }}
-            >
-              {/* ✅ URL Column - More space for long URLs */}
+    <>
+      <TableContainer 
+        component={Paper} 
+        elevation={2}
+        sx={{ 
+          width: '100%',
+          overflowX: 'auto',
+          borderRadius: 1,
+        }}
+      >
+        <Table sx={{ 
+          width: '100%',
+          tableLayout: 'fixed',
+        }}>
+          <TableHead>
+            <TableRow sx={{ backgroundColor: 'grey.50' }}>
               <TableCell 
                 sx={{ 
-                  width: '35%',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  py: 2
+                  width: '25%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider'
                 }}
               >
-                <Tooltip title={page.url}>
-                  <Typography 
-                    variant="body2" 
-                    component="a"
-                    href={page.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    sx={{
-                      textDecoration: 'none',
-                      color: 'primary.main',
-                      '&:hover': {
-                        textDecoration: 'underline',
-                      },
-                      display: 'block',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {page.url}
-                  </Typography>
-                </Tooltip>
+                URL
               </TableCell>
-
-              {/* ✅ Display Name Column */}
-              <TableCell sx={{ width: '15%', py: 2 }}>
-                <Typography 
-                  variant="body2"
-                  sx={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+              <TableCell 
+                sx={{ 
+                  width: '18%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider'
+                }}
+              >
+                Display Name
+              </TableCell>
+              <TableCell 
+                sx={{ 
+                  width: '12%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider',
+                  textAlign: 'center'
+                }}
+              >
+                Status
+              </TableCell>
+              <TableCell 
+                sx={{ 
+                  width: '18%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider',
+                  textAlign: 'center'
+                }}
+              >
+                Last Checked
+              </TableCell>
+              <TableCell 
+                sx={{ 
+                  width: '10%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider',
+                  textAlign: 'center'
+                }}
+              >
+                Interval
+              </TableCell>
+              <TableCell 
+                sx={{ 
+                  width: '17%', 
+                  py: 1.5,
+                  px: 2.5,
+                  fontWeight: 600,
+                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  borderBottom: '2px solid',
+                  borderColor: 'divider',
+                  textAlign: 'center'
+                }}
+              >
+                Actions
+              </TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {pages.map((page) => (
+              <TableRow 
+                key={page.id}
+                sx={{
+                  '&:hover': {
+                    backgroundColor: 'action.hover',
+                  },
+                  opacity: page.is_active ? 1 : 0.6,
+                  height: 60,
+                }}
+              >
+                {/* URL Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle'
                   }}
                 >
-                  {page.display_name || 'Untitled'}
-                </Typography>
-              </TableCell>
+                  <Tooltip title={`${getShortUrl(page.url)}${getUrlPath(page.url)}`}>
+                    <Typography 
+                      variant="body2" 
+                      component="a"
+                      href={page.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      sx={{
+                        textDecoration: 'none',
+                        color: 'primary.main',
+                        fontSize: '0.875rem', // Increased from 0.8125rem
+                        '&:hover': {
+                          textDecoration: 'underline',
+                        },
+                        display: 'block',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: 500,
+                        lineHeight: '1.4'
+                      }}
+                    >
+                      {getShortUrl(page.url)}
+                    </Typography>
+                  </Tooltip>
+                </TableCell>
 
-              {/* ✅ Status Column */}
-              <TableCell sx={{ width: '12%', py: 2 }}>
-                {getStatusChip(page)}
-              </TableCell>
-
-              {/* ✅ Last Checked Column */}
-              <TableCell sx={{ width: '15%', py: 2 }}>
-                <Box>
+                {/* Display Name Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle'
+                  }}
+                >
                   <Typography 
                     variant="body2"
                     sx={{
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                      fontSize: '0.875rem'
+                      fontWeight: 500,
+                      fontSize: '0.875rem', // Increased from 0.8125rem
+                      lineHeight: '1.4'
                     }}
                   >
-                    {formatDate(page.last_checked)}
+                    {page.display_name || 'Untitled'}
                   </Typography>
-                  {page.last_checked && (
+                </TableCell>
+
+                {/* Status Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Box sx={{ 
+                    display: 'flex', 
+                    justifyContent: 'center',
+                    alignItems: 'center'
+                  }}>
+                    {getStatusChip(page)}
+                  </Box>
+                </TableCell>
+
+                {/* Last Checked Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    height: '100%'
+                  }}>
                     <Typography 
-                      variant="caption" 
-                      color="text.secondary"
-                      sx={{ display: 'block', mt: 0.5 }}
+                      variant="body2"
+                      sx={{
+                        fontWeight: 500,
+                        fontSize: '0.875rem', // Increased from 0.8125rem
+                        lineHeight: '1.3'
+                      }}
                     >
-                      {formatTimeAgo(page.last_checked)}
+                      {formatDate(page.last_checked)}
                     </Typography>
-                  )}
-                </Box>
-              </TableCell>
-
-              {/* ✅ Interval Column */}
-              <TableCell sx={{ width: '8%', py: 2 }}>
-                <Typography variant="body2">
-                  {page.check_interval_minutes < 60
-                    ? `${page.check_interval_minutes}m`
-                    : page.check_interval_minutes < 1440
-                    ? `${Math.round(page.check_interval_minutes / 60)}h`
-                    : `${Math.round(page.check_interval_minutes / 1440)}d`
-                  }
-                </Typography>
-              </TableCell>
-
-              {/* ✅ Actions Column - Compact layout */}
-              <TableCell align="right" sx={{ width: '15%', py: 2 }}>
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
-                  {/* Check Now Button */}
-                  <Tooltip title="Check for changes now">
-                    <span>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => onPageCrawl(page.id)}
-                        disabled={crawlingPages.has(page.id) || !page.is_active}
-                        startIcon={
-                          crawlingPages.has(page.id) ? (
-                            <CircularProgress size={16} />
-                          ) : (
-                            <RefreshIcon />
-                          )
-                        }
-                        sx={{ minWidth: 'auto', px: 1 }}
-                      >
-                        {crawlingPages.has(page.id) ? '...' : 'Check'}
-                      </Button>
-                    </span>
-                  </Tooltip>
-
-                  {/* Fact Check Button */}
-                  <Tooltip 
-                    title={
-                      hasVersionsForFactCheck(page) 
-                        ? "Analyze content with fact checking" 
-                        : "Check the page first to enable fact checking"
-                    }
-                  >
-                    <span>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={() => navigate(`/fact-check/${page.id}`)}
-                        disabled={!hasVersionsForFactCheck(page)}
-                        startIcon={<FactCheckIcon />}
+                    {page.last_checked && (
+                      <Typography 
+                        variant="caption" 
+                        color="text.secondary"
                         sx={{ 
-                          minWidth: 'auto',
-                          px: 1,
-                          borderColor: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
-                          color: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
+                          mt: 0.25,
+                          lineHeight: '1.2',
+                          fontSize: '0.8125rem' // Increased from 0.75rem
                         }}
                       >
-                        Fact Check
-                      </Button>
-                    </span>
-                  </Tooltip>
+                        {formatTimeAgo(page.last_checked)}
+                      </Typography>
+                    )}
+                  </Box>
+                </TableCell>
 
-                  {/* Delete Button */}
-                  <Tooltip title="Delete this page">
-                    <span>
-                      <IconButton
-                        color="error"
-                        size="small"
-                        onClick={() => {
-                          if (window.confirm(`Are you sure you want to delete monitoring for "${page.display_name || page.url}"?`)) {
-                            onPageDeleted(page.id);
+                {/* Interval Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle',
+                    textAlign: 'center'
+                  }}
+                >
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      fontWeight: 500,
+                      fontSize: '0.875rem', // Increased from 0.8125rem
+                      lineHeight: '1.4'
+                    }}
+                  >
+                    {page.check_interval_minutes < 60
+                      ? `${page.check_interval_minutes}m`
+                      : page.check_interval_minutes < 1440
+                      ? `${Math.round(page.check_interval_minutes / 60)}h`
+                      : `${Math.round(page.check_interval_minutes / 1440)}d`
+                    }
+                  </Typography>
+                </TableCell>
+
+                {/* Actions Column */}
+                <TableCell 
+                  sx={{ 
+                    py: 1.5,
+                    px: 2.5,
+                    verticalAlign: 'middle'
+                  }}
+                >
+                  <Box sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    gap: 1,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%'
+                  }}>
+                    {/* Check Now Button */}
+                    <Tooltip title="Check for changes now">
+                      <span>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => onPageCrawl(page.id)}
+                          disabled={crawlingPages.has(page.id) || !page.is_active}
+                          startIcon={
+                            crawlingPages.has(page.id) ? (
+                              <CircularProgress size={14} />
+                            ) : (
+                              <RefreshIcon />
+                            )
                           }
-                        }}
-                        disabled={deletingPages.has(page.id)}
-                      >
-                        {deletingPages.has(page.id) ? (
-                          <CircularProgress size={20} />
-                        ) : (
-                          <DeleteIcon />
-                        )}
-                      </IconButton>
-                    </span>
-                  </Tooltip>
-                </Box>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+                          sx={{ 
+                            width: '100%',
+                            maxWidth: 140,
+                            height: 30,
+                            fontSize: '0.875rem', // Increased from 0.8125rem
+                            textTransform: 'none',
+                            borderRadius: 1,
+                            py: 0.5,
+                            minHeight: 'auto'
+                          }}
+                        >
+                          {crawlingPages.has(page.id) ? 'Checking...' : 'Check Now'}
+                        </Button>
+                      </span>
+                    </Tooltip>
+
+                    {/* Fact Check Button */}
+                    <Tooltip 
+                      title={
+                        hasVersionsForFactCheck(page) 
+                          ? "Analyze content with fact checking" 
+                          : "Check the page first to enable fact checking"
+                      }
+                    >
+                      <span>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => navigate(`/fact-check/${page.id}`)}
+                          disabled={!hasVersionsForFactCheck(page)}
+                          startIcon={<FactCheckIcon />}
+                          sx={{ 
+                            width: '100%',
+                            maxWidth: 140,
+                            height: 30,
+                            fontSize: '0.875rem', // Increased from 0.8125rem
+                            textTransform: 'none',
+                            borderRadius: 1,
+                            py: 0.5,
+                            minHeight: 'auto',
+                            borderColor: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
+                            color: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
+                          }}
+                        >
+                          Fact Check
+                        </Button>
+                      </span>
+                    </Tooltip>
+
+                    {/* Edit and Delete buttons */}
+                    <Box sx={{ 
+                      display: 'flex', 
+                      gap: 1.5,
+                      justifyContent: 'center',
+                      width: '100%',
+                      maxWidth: 140,
+                    }}>
+                      <Tooltip title="Edit page">
+                        <span>
+                          <IconButton
+                            color="primary"
+                            size="small"
+                            onClick={() => handleEditClick(page)}
+                            disabled={!page.is_active}
+                            sx={{ 
+                              width: 30,
+                              height: 30,
+                              color: 'primary.main',
+                              '&:hover': {
+                                backgroundColor: 'primary.light',
+                              }
+                            }}
+                          >
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+
+                      <Tooltip title="Delete page">
+                        <span>
+                          <IconButton
+                            color="error"
+                            size="small"
+                            onClick={() => {
+                              if (window.confirm(`Delete "${page.display_name || page.url}"?`)) {
+                                onPageDeleted(page.id);
+                              }
+                            }}
+                            disabled={deletingPages.has(page.id)}
+                            sx={{ 
+                              width: 30,
+                              height: 30,
+                            }}
+                          >
+                            {deletingPages.has(page.id) ? (
+                              <CircularProgress size={16} />
+                            ) : (
+                              <DeleteIcon fontSize="small" />
+                            )}
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Box>
+                  </Box>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+
+      {/* Edit Dialog */}
+      <Dialog 
+        open={!!editingPage} 
+        onClose={() => setEditingPage(null)}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 2 }
+        }}
+      >
+        <DialogTitle sx={{ borderBottom: 1, borderColor: 'divider', pb: 2 }}>
+          Edit Page
+        </DialogTitle>
+        <DialogContent sx={{ pt: 3 }}>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            {/* Display Name Field */}
+            <TextField
+              label="Display Name"
+              value={editFormData.display_name}
+              onChange={(e) => setEditFormData({
+                ...editFormData,
+                display_name: e.target.value
+              })}
+              fullWidth
+              required
+              disabled={editLoading}
+              size="medium"
+            />
+
+            {/* URL Field (read-only) */}
+            <TextField
+              label="URL"
+              value={editingPage?.url || ''}
+              fullWidth
+              disabled
+              size="medium"
+              InputProps={{
+                readOnly: true,
+              }}
+            />
+
+            {/* Check Interval Field */}
+            <TextField
+              select
+              label="Check Interval"
+              value={editFormData.check_interval_hours}
+              onChange={(e) => setEditFormData({
+                ...editFormData,
+                check_interval_hours: parseInt(e.target.value)
+              })}
+              fullWidth
+              disabled={editLoading}
+              size="medium"
+            >
+              {intervalOptions.map((option) => (
+                <MenuItem key={option.value} value={option.value}>
+                  {option.label}
+                </MenuItem>
+              ))}
+            </TextField>
+
+            {/* Error Display */}
+            {editError && (
+              <Typography 
+                color="error" 
+                variant="body2"
+                sx={{ 
+                  p: 1.5, 
+                  borderRadius: 1, 
+                  backgroundColor: 'error.light',
+                  border: '1px solid',
+                  borderColor: 'error.main'
+                }}
+              >
+                {editError}
+              </Typography>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: 'divider' }}>
+          <Button 
+            onClick={() => setEditingPage(null)} 
+            disabled={editLoading}
+            color="inherit"
+            sx={{ minWidth: 90 }}
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleEditSubmit} 
+            disabled={editLoading}
+            variant="contained"
+            color="primary"
+            sx={{ minWidth: 120 }}
+          >
+            {editLoading ? (
+              <>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                Updating...
+              </>
+            ) : (
+              'Update Page'
+            )}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 };
 
