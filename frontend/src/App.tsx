@@ -34,18 +34,22 @@ interface ProtectedRouteProps {
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
   const { isAuthenticated, loading, validateToken } = useAuth();
   const [validating, setValidating] = React.useState(false);
+  const [tokenValid, setTokenValid] = React.useState<boolean | null>(null);
 
   useEffect(() => {
     const checkTokenValidity = async () => {
-      if (isAuthenticated && !loading) {
+      // Only validate if authenticated and not loading
+      if (isAuthenticated && !loading && tokenValid === null) {
         setValidating(true);
         try {
           const isValid = await validateToken();
+          setTokenValid(isValid);
           if (!isValid) {
             console.log('Token invalid, redirecting to login');
           }
         } catch (error) {
           console.error('Token validation error:', error);
+          setTokenValid(false);
         } finally {
           setValidating(false);
         }
@@ -53,9 +57,15 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     };
 
     checkTokenValidity();
-  }, [isAuthenticated, loading, validateToken]);
+  }, [isAuthenticated, loading, validateToken, tokenValid]);
 
   if (loading || validating) return <LoadingSpinner />;
+  
+  // Redirect if token validation failed
+  if (tokenValid === false) {
+    return <Navigate to="/login" />;
+  }
+  
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
 };
 
@@ -108,7 +118,14 @@ const LandingRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 const AuthAwareRoute: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
   
+  // ✅ FIXED: Moved useEffect BEFORE any conditional returns
+  React.useEffect(() => {
+    // This will run once on mount
+    // You can add any side effects here if needed
+  }, []);
+  
   if (loading) return <LoadingSpinner />;
+  
   return <Navigate to={isAuthenticated ? "/dashboard" : "/"} replace />;
 };
 

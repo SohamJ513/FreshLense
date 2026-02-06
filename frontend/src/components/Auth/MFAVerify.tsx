@@ -14,7 +14,6 @@ import { styled } from '@mui/material/styles';
 import { useAuth } from '../../contexts/AuthContext';
 import { resendMFACode } from '../../services/mfaApi';
 import { useNavigate } from 'react-router-dom';
-import api from '../../services/api'; // ✅ Add axios import
 
 interface MFAVerifyProps {
   email: string;
@@ -105,73 +104,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
     }
   };
 
-  // ✅ Helper function to test API with current token
-  const testTokenWithAPI = async (): Promise<boolean> => {
-    try {
-      console.log('🧪 [MFA Component] Testing token with API...');
-      
-      // Check what's in localStorage
-      const token = localStorage.getItem('token');
-      console.log('🔍 [MFA Component] Token from localStorage:', token ? `Present (${token.length} chars)` : 'Missing');
-      
-      if (!token) {
-        console.error('❌ [MFA Component] No token found in localStorage');
-        return false;
-      }
-
-      // Try a simple protected endpoint
-      // Try /auth/me or /pages (whichever exists)
-      console.log('📡 [MFA Component] Making test API call...');
-      
-      // First try /auth/me
-      try {
-        const response = await api.get('/auth/me', {
-          validateStatus: (status) => status < 500 // Don't throw on 401/403
-        });
-        
-        console.log('✅ [MFA Component] Test API call to /auth/me:', response.status);
-        
-        if (response.status === 200) {
-          console.log('🎯 [MFA Component] Token verified successfully!');
-          return true;
-        } else if (response.status === 401) {
-          console.error('❌ [MFA Component] Token invalid (401 Unauthorized)');
-          return false;
-        }
-      } catch (authError: any) {
-        console.log('⚠️ [MFA Component] /auth/me endpoint not available, trying /pages...');
-      }
-
-      // If /auth/me doesn't exist or failed, try /pages
-      try {
-        const response = await api.get('/pages', {
-          validateStatus: (status) => status < 500
-        });
-        
-        console.log('✅ [MFA Component] Test API call to /pages:', response.status);
-        
-        if (response.status === 200) {
-          console.log('🎯 [MFA Component] Token verified successfully!');
-          return true;
-        } else if (response.status === 401) {
-          console.error('❌ [MFA Component] Token invalid (401 Unauthorized)');
-          return false;
-        } else {
-          console.log(`⚠️ [MFA Component] Got status ${response.status} - might be OK`);
-          return true; // Even if not 200, might be OK (e.g., 404, 403)
-        }
-      } catch (pagesError: any) {
-        console.error('❌ [MFA Component] Both test endpoints failed:', pagesError.message);
-        return false;
-      }
-      
-      return false;
-    } catch (error: any) {
-      console.error('❌ [MFA Component] Token test failed:', error.message);
-      return false;
-    }
-  };
-
   const handleSubmit = async () => {
     if (code.length !== 6) {
       setError('Please enter a 6-digit code');
@@ -204,25 +136,11 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
         console.log('🔍 [MFA Component] Before redirect - Token:', token ? `Present (${token.length} chars)` : 'Missing');
         console.log('🔍 [MFA Component] Before redirect - User:', user ? 'Present' : 'Missing');
         
-        // ✅ NEW: Test the token with API before redirect
-        console.log('🧪 [MFA Component] Testing token with API before redirect...');
-        const tokenIsValid = await testTokenWithAPI();
+        console.log('✅ [MFA Component] Token verified! Proceeding to redirect...');
         
-        if (!tokenIsValid) {
-          console.error('❌ [MFA Component] Token test FAILED! Not redirecting.');
-          setError('Authentication failed. Token is not valid. Please try again.');
-          localStorage.removeItem('token');
-          localStorage.removeItem('user');
-          setCode('');
-          setLoading(false);
-          return;
-        }
-        
-        console.log('✅ [MFA Component] Token verified with API! Proceeding to redirect...');
-        
-        // ✅ Wait 1 second to see logs (reduced from 3)
-        console.log('⏳ [MFA Component] Waiting 1 second before redirect...');
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // ✅ Wait 500ms for state to settle
+        console.log('⏳ [MFA Component] Waiting 500ms before redirect...');
+        await new Promise(resolve => setTimeout(resolve, 500));
         
         console.log('🚀 [MFA Component] Now redirecting to dashboard...');
         navigate('/dashboard');
@@ -422,4 +340,3 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
 };
 
 export default MFAVerify;
-

@@ -323,6 +323,17 @@ export interface MFAStatusResponse {
   mfa_setup_completed: boolean;
 }
 
+// ✅ ADDED: Validate Token Types
+export interface ValidateTokenRequest {
+  token: string;
+}
+
+export interface ValidateTokenResponse {
+  valid: boolean;
+  email?: string;
+  exp?: number;
+}
+
 // ---------------- Auth API ----------------
 export const authAPI = {
   register: (userData: { email: string; password: string }) =>
@@ -334,6 +345,14 @@ export const authAPI = {
     return api.post<LoginResponse | MFALoginResponse>('/auth/login', {
       email: credentials.email,
       password: credentials.password
+    });
+  },
+
+  // ✅ ADDED: Validate token endpoint
+  validateToken: (token: string) => {
+    console.log('[Auth] Validating token');
+    return api.post<ValidateTokenResponse>('/auth/validate-token', { 
+      token 
     });
   },
 
@@ -529,6 +548,25 @@ export const tokenUtils = {
     }
   },
   
+  // ✅ ADDED: Validate token with backend
+  validateWithBackend: async (): Promise<boolean> => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.log(`[Token] No token to validate with backend`);
+      return false;
+    }
+    
+    try {
+      console.log(`[Token] Validating token with backend...`);
+      const response = await authAPI.validateToken(token);
+      console.log(`[Token] Backend validation result:`, response.data);
+      return response.data.valid === true;
+    } catch (error: any) {
+      console.error(`[Token] Backend validation failed:`, error.message);
+      return false;
+    }
+  },
+  
   // ✅ MFA Token Handling
   setMFAToken: (tokenData: { access_token: string; token_type: string }): void => {
     console.log(`[Token] Setting MFA token`);
@@ -620,6 +658,11 @@ export const testAPIConnection = async (): Promise<{ success: boolean; message: 
       message: `API connection failed: ${error.message}` 
     };
   }
+};
+
+// ✅ ADDED: Convenience function for token validation
+export const validateToken = async (): Promise<boolean> => {
+  return tokenUtils.validateWithBackend();
 };
 
 // Export custom error type

@@ -90,7 +90,7 @@ const PageList: React.FC<PageListProps> = ({
           size="small" 
           color="default"
           icon={<WarningIcon />}
-          sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
+          sx={{ height: 28, fontSize: '0.875rem' }}
         />
       );
     }
@@ -103,7 +103,7 @@ const PageList: React.FC<PageListProps> = ({
             size="small" 
             color="success"
             icon={<CheckCircleIcon />}
-            sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
+            sx={{ height: 28, fontSize: '0.875rem' }}
           />
         </Tooltip>
       );
@@ -116,7 +116,7 @@ const PageList: React.FC<PageListProps> = ({
           size="small" 
           color="primary"
           icon={<ScheduleIcon />}
-          sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
+          sx={{ height: 28, fontSize: '0.875rem' }}
         />
       );
     }
@@ -127,7 +127,7 @@ const PageList: React.FC<PageListProps> = ({
         size="small" 
         color="warning"
         icon={<ScheduleIcon />}
-        sx={{ height: 26, fontSize: '0.8125rem' }} // Increased from 0.75rem
+        sx={{ height: 28, fontSize: '0.875rem' }}
       />
     );
   };
@@ -196,7 +196,7 @@ const PageList: React.FC<PageListProps> = ({
       const urlObj = new URL(url);
       return urlObj.hostname.replace('www.', '');
     } catch {
-      return url.length > 40 ? url.substring(0, 37) + '...' : url;
+      return url.length > 35 ? url.substring(0, 32) + '...' : url;
     }
   };
 
@@ -242,11 +242,11 @@ const PageList: React.FC<PageListProps> = ({
             <TableRow sx={{ backgroundColor: 'grey.50' }}>
               <TableCell 
                 sx={{ 
-                  width: '25%', 
-                  py: 1.5,
-                  px: 2.5,
+                  width: '22%', 
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider'
                 }}
@@ -256,10 +256,10 @@ const PageList: React.FC<PageListProps> = ({
               <TableCell 
                 sx={{ 
                   width: '18%', 
-                  py: 1.5,
-                  px: 2.5,
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider'
                 }}
@@ -269,10 +269,10 @@ const PageList: React.FC<PageListProps> = ({
               <TableCell 
                 sx={{ 
                   width: '12%', 
-                  py: 1.5,
-                  px: 2.5,
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider',
                   textAlign: 'center'
@@ -282,11 +282,11 @@ const PageList: React.FC<PageListProps> = ({
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '18%', 
-                  py: 1.5,
-                  px: 2.5,
+                  width: '16%', 
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider',
                   textAlign: 'center'
@@ -297,10 +297,10 @@ const PageList: React.FC<PageListProps> = ({
               <TableCell 
                 sx={{ 
                   width: '10%', 
-                  py: 1.5,
-                  px: 2.5,
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider',
                   textAlign: 'center'
@@ -310,11 +310,11 @@ const PageList: React.FC<PageListProps> = ({
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '17%', 
-                  py: 1.5,
-                  px: 2.5,
+                  width: '22%', 
+                  py: 2,
+                  px: 3,
                   fontWeight: 600,
-                  fontSize: '0.9375rem', // Increased from 0.875rem
+                  fontSize: '0.9375rem',
                   borderBottom: '2px solid',
                   borderColor: 'divider',
                   textAlign: 'center'
@@ -333,14 +333,14 @@ const PageList: React.FC<PageListProps> = ({
                     backgroundColor: 'action.hover',
                   },
                   opacity: page.is_active ? 1 : 0.6,
-                  height: 60,
+                  height: 64,
                 }}
               >
                 {/* URL Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
+                    py: 1.75,
+                    px: 3,
                     verticalAlign: 'middle'
                   }}
                 >
@@ -354,7 +354,7 @@ const PageList: React.FC<PageListProps> = ({
                       sx={{
                         textDecoration: 'none',
                         color: 'primary.main',
-                        fontSize: '0.875rem', // Increased from 0.8125rem
+                        fontSize: '0.875rem',
                         '&:hover': {
                           textDecoration: 'underline',
                         },
@@ -374,8 +374,8 @@ const PageList: React.FC<PageListProps> = ({
                 {/* Display Name Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
+                    py: 1.75,
+                    px: 3,
                     verticalAlign: 'middle'
                   }}
                 >
@@ -386,19 +386,19 @@ const PageList: React.FC<PageListProps> = ({
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                       fontWeight: 500,
-                      fontSize: '0.875rem', // Increased from 0.8125rem
+                      fontSize: '0.875rem',
                       lineHeight: '1.4'
                     }}
                   >
-                    {page.display_name || 'Untitled'}
+                    {page.display_name || '-'}
                   </Typography>
                 </TableCell>
 
                 {/* Status Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
+                    py: 1.75,
+                    px: 3,
                     verticalAlign: 'middle',
                     textAlign: 'center'
                   }}
@@ -415,8 +415,8 @@ const PageList: React.FC<PageListProps> = ({
                 {/* Last Checked Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
+                    py: 1.75,
+                    px: 3,
                     verticalAlign: 'middle',
                     textAlign: 'center'
                   }}
@@ -432,7 +432,7 @@ const PageList: React.FC<PageListProps> = ({
                       variant="body2"
                       sx={{
                         fontWeight: 500,
-                        fontSize: '0.875rem', // Increased from 0.8125rem
+                        fontSize: '0.875rem',
                         lineHeight: '1.3'
                       }}
                     >
@@ -445,7 +445,7 @@ const PageList: React.FC<PageListProps> = ({
                         sx={{ 
                           mt: 0.25,
                           lineHeight: '1.2',
-                          fontSize: '0.8125rem' // Increased from 0.75rem
+                          fontSize: '0.8125rem'
                         }}
                       >
                         {formatTimeAgo(page.last_checked)}
@@ -457,8 +457,8 @@ const PageList: React.FC<PageListProps> = ({
                 {/* Interval Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
+                    py: 1.75,
+                    px: 3,
                     verticalAlign: 'middle',
                     textAlign: 'center'
                   }}
@@ -467,7 +467,7 @@ const PageList: React.FC<PageListProps> = ({
                     variant="body2" 
                     sx={{ 
                       fontWeight: 500,
-                      fontSize: '0.875rem', // Increased from 0.8125rem
+                      fontSize: '0.875rem',
                       lineHeight: '1.4'
                     }}
                   >
@@ -483,90 +483,25 @@ const PageList: React.FC<PageListProps> = ({
                 {/* Actions Column */}
                 <TableCell 
                   sx={{ 
-                    py: 1.5,
-                    px: 2.5,
-                    verticalAlign: 'middle'
+                    py: 1.75,
+                    px: 3,
+                    verticalAlign: 'middle',
+                    textAlign: 'center'
                   }}
                 >
                   <Box sx={{ 
                     display: 'flex', 
-                    flexDirection: 'column', 
-                    gap: 1,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    height: '100%'
+                    gap: 2.5,
+                    width: '100%'
                   }}>
-                    {/* Check Now Button */}
-                    <Tooltip title="Check for changes now">
-                      <span>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => onPageCrawl(page.id)}
-                          disabled={crawlingPages.has(page.id) || !page.is_active}
-                          startIcon={
-                            crawlingPages.has(page.id) ? (
-                              <CircularProgress size={14} />
-                            ) : (
-                              <RefreshIcon />
-                            )
-                          }
-                          sx={{ 
-                            width: '100%',
-                            maxWidth: 140,
-                            height: 30,
-                            fontSize: '0.875rem', // Increased from 0.8125rem
-                            textTransform: 'none',
-                            borderRadius: 1,
-                            py: 0.5,
-                            minHeight: 'auto'
-                          }}
-                        >
-                          {crawlingPages.has(page.id) ? 'Checking...' : 'Check Now'}
-                        </Button>
-                      </span>
-                    </Tooltip>
-
-                    {/* Fact Check Button */}
-                    <Tooltip 
-                      title={
-                        hasVersionsForFactCheck(page) 
-                          ? "Analyze content with fact checking" 
-                          : "Check the page first to enable fact checking"
-                      }
-                    >
-                      <span>
-                        <Button
-                          variant="outlined"
-                          size="small"
-                          onClick={() => navigate(`/fact-check/${page.id}`)}
-                          disabled={!hasVersionsForFactCheck(page)}
-                          startIcon={<FactCheckIcon />}
-                          sx={{ 
-                            width: '100%',
-                            maxWidth: 140,
-                            height: 30,
-                            fontSize: '0.875rem', // Increased from 0.8125rem
-                            textTransform: 'none',
-                            borderRadius: 1,
-                            py: 0.5,
-                            minHeight: 'auto',
-                            borderColor: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
-                            color: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.400',
-                          }}
-                        >
-                          Fact Check
-                        </Button>
-                      </span>
-                    </Tooltip>
-
-                    {/* Edit and Delete buttons */}
+                    {/* Icon Buttons - Stacked vertically */}
                     <Box sx={{ 
                       display: 'flex', 
-                      gap: 1.5,
-                      justifyContent: 'center',
-                      width: '100%',
-                      maxWidth: 140,
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: 0.75
                     }}>
                       <Tooltip title="Edit page">
                         <span>
@@ -576,11 +511,11 @@ const PageList: React.FC<PageListProps> = ({
                             onClick={() => handleEditClick(page)}
                             disabled={!page.is_active}
                             sx={{ 
-                              width: 30,
-                              height: 30,
+                              width: 34,
+                              height: 34,
                               color: 'primary.main',
                               '&:hover': {
-                                backgroundColor: 'primary.light',
+                                backgroundColor: 'primary.50',
                               }
                             }}
                           >
@@ -601,8 +536,11 @@ const PageList: React.FC<PageListProps> = ({
                             }}
                             disabled={deletingPages.has(page.id)}
                             sx={{ 
-                              width: 30,
-                              height: 30,
+                              width: 34,
+                              height: 34,
+                              '&:hover': {
+                                backgroundColor: 'error.50',
+                              }
                             }}
                           >
                             {deletingPages.has(page.id) ? (
@@ -611,6 +549,86 @@ const PageList: React.FC<PageListProps> = ({
                               <DeleteIcon fontSize="small" />
                             )}
                           </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Box>
+
+                    {/* Text Buttons - Side by Side */}
+                    <Box sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      gap: 0.75,
+                      width: 130
+                    }}>
+                      {/* Check Now Button */}
+                      <Tooltip title="Check for changes now">
+                        <span>
+                          <Button
+                            variant="contained"
+                            size="small"
+                            onClick={() => onPageCrawl(page.id)}
+                            disabled={crawlingPages.has(page.id) || !page.is_active}
+                            startIcon={
+                              crawlingPages.has(page.id) ? (
+                                <CircularProgress size={14} color="inherit" />
+                              ) : (
+                                <RefreshIcon />
+                              )
+                            }
+                            sx={{ 
+                              width: '100%',
+                              height: 32,
+                              fontSize: '0.875rem',
+                              textTransform: 'none',
+                              borderRadius: 1.25,
+                              boxShadow: 'none',
+                              px: 1.5,
+                              minWidth: 'auto',
+                              whiteSpace: 'nowrap',
+                              '&:hover': {
+                                boxShadow: '0 1px 4px rgba(37, 99, 235, 0.2)',
+                              }
+                            }}
+                          >
+                            {crawlingPages.has(page.id) ? 'Checking...' : 'Check Now'}
+                          </Button>
+                        </span>
+                      </Tooltip>
+
+                      {/* Fact Check Button */}
+                      <Tooltip 
+                        title={
+                          hasVersionsForFactCheck(page) 
+                            ? "Analyze content with fact checking" 
+                            : "Check the page first to enable fact checking"
+                        }
+                      >
+                        <span>
+                          <Button
+                            variant="outlined"
+                            size="small"
+                            onClick={() => navigate(`/fact-check/${page.id}`)}
+                            disabled={!hasVersionsForFactCheck(page)}
+                            startIcon={<FactCheckIcon />}
+                            sx={{ 
+                              width: '100%',
+                              height: 32,
+                              fontSize: '0.875rem',
+                              textTransform: 'none',
+                              borderRadius: 1.25,
+                              px: 1.5,
+                              minWidth: 'auto',
+                              whiteSpace: 'nowrap',
+                              borderColor: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.300',
+                              color: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.500',
+                              '&:hover': {
+                                borderColor: hasVersionsForFactCheck(page) ? 'primary.dark' : 'grey.400',
+                                backgroundColor: hasVersionsForFactCheck(page) ? 'primary.50' : 'transparent',
+                              }
+                            }}
+                          >
+                            Fact Check
+                          </Button>
                         </span>
                       </Tooltip>
                     </Box>

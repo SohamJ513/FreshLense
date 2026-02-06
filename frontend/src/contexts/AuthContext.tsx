@@ -54,7 +54,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [token, setToken] = useState<string | null>(null);
   const [mfaEmail, setMfaEmail] = useState<string | null>(null);
 
-  // ✅ NEW: Function to validate token with backend
+  // ✅ FIXED: Function to validate token with backend - REMOVED DOUBLE /api/
   const validateTokenWithBackend = async (): Promise<boolean> => {
     const storedToken = localStorage.getItem('token');
     if (!storedToken) {
@@ -64,7 +64,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     try {
       console.log('🔍 [Auth] Validating token with backend...');
-      const response = await api.post('/api/auth/validate-token', { token: storedToken });
+      // ✅ FIXED: Use authAPI.validateToken() instead of direct api.post()
+      const response = await authAPI.validateToken(storedToken);
       return response.data.valid === true;
     } catch (error) {
       console.log('❌ [Auth] Token validation failed:', error);
@@ -380,7 +381,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setMfaEmail(null);
   };
 
-  // ✅ NEW: Public method to validate token
+  // ✅ FIXED: Public method to validate token
   const validateToken = async (): Promise<boolean> => {
     return await validateTokenWithBackend();
   };
@@ -396,7 +397,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isAuthenticated: !!token && !!user,
     mfaEmail,
     clearMFAEmail,
-    validateToken, // ✅ NEW
+    validateToken,
   };
 
   return (
