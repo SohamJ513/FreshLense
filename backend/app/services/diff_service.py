@@ -351,13 +351,23 @@ class DiffService:
         
         # Word-level changes (more accurate than set difference)
         word_differ = difflib.SequenceMatcher(None, words_old, words_new)
-        word_changes = sum(size for tag, i1, i2, j1, j2 in word_differ.get_opcodes() 
-                          if tag != 'equal')
+        
+        # FIXED: Calculate total changed words (removed + added)
+        word_changes = 0
+        for tag, i1, i2, j1, j2 in word_differ.get_opcodes():
+            if tag != 'equal':
+                # Words removed from old + words added to new
+                word_changes += (i2 - i1) + (j2 - j1)
         
         # Line-level structural changes
         line_differ = difflib.SequenceMatcher(None, old_lines, new_lines)
-        line_changes = sum(size for tag, i1, i2, j1, j2 in line_differ.get_opcodes() 
-                          if tag != 'equal')
+        
+        # FIXED: Calculate total changed lines (removed + added)
+        line_changes = 0
+        for tag, i1, i2, j1, j2 in line_differ.get_opcodes():
+            if tag != 'equal':
+                # Lines removed from old + lines added to new
+                line_changes += (i2 - i1) + (j2 - j1)
         
         # Calculate percentages
         total_words_old = len(words_old)
