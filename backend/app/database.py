@@ -6,11 +6,15 @@ import hashlib
 from typing import List, Dict, Any, Optional
 from bson import ObjectId
 from passlib.context import CryptContext
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# MongoDB connection
+# MongoDB connection - UPDATED FOR ATLAS
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 client = None
 db = None
@@ -19,7 +23,7 @@ try:
     client = MongoClient(MONGO_URI)
     client.admin.command('ping')  # Test the connection
     print("✅ MongoDB connection successful!")
-    db = client['freshlense']
+    db = client['freshlense']  # Note: Your DB name is 'freshlense' (from your code)
 
     # Collections
     users_collection = db['users']
