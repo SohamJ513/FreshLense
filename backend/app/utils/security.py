@@ -8,6 +8,7 @@ import os
 from dotenv import load_dotenv
 import logging
 from bson import ObjectId
+import bcrypt
 
 load_dotenv()
 
@@ -21,18 +22,97 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 1440))  # 24 hours default
 
 # OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
-# Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# ================================================
+# ✅ BCRYPT INITIALIZATION WITH ERROR HANDLING
+# ================================================
+
+# Test bcrypt backend on startup
+try:
+    # Force bcrypt backend to load by doing a test hash
+    test_hash = bcrypt.hashpw(b"test_password", bcrypt.gensalt())
+    logger.info("✅ bcrypt backend loaded successfully")
+except Exception as e:
+    logger.error(f"❌ bcrypt backend failed to load: {e}")
+    logger.error("Password hashing will not work correctly!")
+
+# Password hashing with explicit configuration
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=12,  # Explicitly set rounds
+    bcrypt__ident="2b"  # Use bcrypt version 2b
+)
+
+def validate_password_length(password: str) -> str:
+    """
+    Validate and truncate password if longer than 72 bytes (bcrypt limitation)
+    Returns the (possibly truncated) password.
+    """
+    password_bytes = password.encode('utf-8')
+    if len(password_bytes) > 72:
+        logger.warning(f"Password longer than 72 bytes ({len(password_bytes)} bytes), truncating to 72 bytes")
+        # Truncate to 72 bytes, decoding back to string
+        return password_bytes[:72].decode('utf-8', errors='ignore')
+    return password
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a plain password against a hashed password"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """
+    Verify a plain password against a hashed password with proper error handling.
+    """
+    if not plain_password or not hashed_password:
+        logger.error("Password verification failed: missing password or hash")
+        return False
+    
+    try:
+        # Validate password length for bcrypt
+        validated_password = validate_password_length(plain_password)
+        
+        logger.debug(f"Verifying password (length: {len(validated_password)} chars)")
+        result = pwd_context.verify(validated_password, hashed_password)
+        logger.debug(f"Password verification result: {result}")
+        return result
+        
+    except ValueError as ve:
+        # Specific handling for bcrypt value errors
+        if "invalid salt" in str(ve):
+            logger.error(f"Invalid salt in hash - hash may be corrupted: {ve}")
+        elif "invalid bcrypt hash" in str(ve):
+            logger.error(f"Invalid bcrypt hash format - hash may be corrupted: {ve}")
+        else:
+            logger.error(f"Password verification value error: {ve}")
+        return False
+        
+    except Exception as e:
+        logger.error(f"Password verification error: {e}")
+        # Log more details for debugging
+        logger.debug(f"Password type: {type(plain_password)}")
+        logger.debug(f"Hash type: {type(hashed_password)}")
+        logger.debug(f"Hash preview: {hashed_password[:30] if hashed_password else 'None'}...")
+        return False
 
 def get_password_hash(password: str) -> str:
-    """Hash a password"""
-    return pwd_context.hash(password)
+    """
+    Hash a password with proper error handling.
+    """
+    if not password:
+        logger.error("Password hashing failed: empty password")
+        raise ValueError("Password cannot be empty")
+    
+    try:
+        # Validate password length for bcrypt
+        validated_password = validate_password_length(password)
+        
+        logger.debug(f"Hashing password (length: {len(validated_password)} chars)")
+        hashed = pwd_context.hash(validated_password)
+        logger.debug(f"Password hashed successfully, result length: {len(hashed)}")
+        return hashed
+        
+    except Exception as e:
+        logger.error(f"Password hashing error: {e}")
+        # Re-raise as ValueError with more context
+        raise ValueError(f"Failed to hash password: {str(e)}")
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token"""
@@ -69,10 +149,10 @@ def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
         
         return payload
     except jwt.ExpiredSignatureError:
-        logger.warning(f"Token expired")  # Changed to warning
+        logger.warning(f"Token expired")
         return None
     except jwt.InvalidTokenError as e:
-        logger.warning(f"Invalid token: {e}")  # Changed to warning
+        logger.warning(f"Invalid token: {e}")
         return None
 
 def get_user_id_from_token(token: str) -> Optional[str]:
@@ -89,10 +169,10 @@ def is_token_valid(token: str) -> bool:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": True})
         return True
     except jwt.ExpiredSignatureError:
-        logger.debug(f"Token expired")  # Changed to debug
+        logger.debug(f"Token expired")
         return False
     except jwt.InvalidTokenError:
-        logger.debug(f"Invalid token")  # Changed to debug
+        logger.debug(f"Invalid token")
         return False
 
 # ✅ ADDED: Function to get token expiry info
@@ -115,7 +195,7 @@ def get_token_expiry_info(token: str) -> Dict[str, Any]:
                 "subject": payload.get('sub')
             }
     except Exception as e:
-        logger.error(f"Error getting token info: {e}")  # Keep error for actual errors
+        logger.error(f"Error getting token info: {e}")
     
     return {"valid": False, "expires_at": None, "time_remaining_seconds": 0}
 
@@ -127,6 +207,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    # If no token provided, raise exception
+    if not token:
+        logger.warning("No token provided")
+        raise credentials_exception
     
     # Import here to avoid circular imports
     from ..database import get_user_by_email
