@@ -254,11 +254,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
-origins = [
-    "http://localhost:3000",
-    "chrome-extension://*",
-]
+# ================================================
+# ✅ FIXED: CORS middleware using environment variable
+# ================================================
+
+# Get allowed origins from environment variable
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+origins = [origin.strip() for origin in allowed_origins_str.split(",")]
+
+# Always include chrome-extension for extension support
+if "chrome-extension://*" not in origins:
+    origins.append("chrome-extension://*")
+
+# Log the CORS configuration
+print(f"🔧 CORS configured with origins: {origins}")
+logger.info(f"CORS allowed origins: {origins}")
 
 app.add_middleware(
     CORSMiddleware,
