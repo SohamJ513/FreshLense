@@ -2,7 +2,13 @@
 import axios, { AxiosError, AxiosHeaders, AxiosResponse } from 'axios';
 import { MFALoginResponse } from '../types/mfa';
 
-const API_BASE_URL = 'http://localhost:8000/api';
+// ✅ FIXED: Use environment variable with fallback to localhost for development
+const API_BASE_URL = process.env.REACT_APP_BACKEND_URL 
+  ? `${process.env.REACT_APP_BACKEND_URL}/api` 
+  : 'http://localhost:8000/api';
+
+// Log the API URL being used (helps with debugging)
+console.log(`🔧 [API] Configured to use: ${API_BASE_URL}`);
 
 // Custom error type for MFA
 class MFARequiredError extends Error {
@@ -87,6 +93,8 @@ api.interceptors.request.use(
     const tokenFromAxios = getAuthorizationHeader();
     
     console.log(`🔍 [API] Request to ${config.url}:`);
+    console.log(`  - Base URL: ${API_BASE_URL}`);
+    console.log(`  - Full URL: ${config.baseURL}${config.url}`);
     console.log(`  - Token in localStorage: ${tokenFromStorage ? `Present (${tokenFromStorage.length} chars)` : 'MISSING'}`);
     console.log(`  - Token in axios defaults: ${tokenFromAxios ? 'Set' : 'NOT SET'}`);
     
@@ -140,6 +148,7 @@ api.interceptors.response.use(
       console.log(`🔍 [API] Debug information for 401:`);
       console.log(`  - URL: ${url}`);
       console.log(`  - Method: ${method}`);
+      console.log(`  - Base URL: ${API_BASE_URL}`);
       
       // Safely get token from localStorage
       const storedToken = localStorage.getItem('token');
@@ -342,6 +351,7 @@ export const authAPI = {
   // ✅ FIXED: Changed to 'email' field and sends as JSON
   login: (credentials: { email: string; password: string }) => {
     console.log('[Auth] Sending login request for:', credentials.email);
+    console.log(`[Auth] Using API URL: ${API_BASE_URL}/auth/login`);
     return api.post<LoginResponse | MFALoginResponse>('/auth/login', {
       email: credentials.email,
       password: credentials.password
