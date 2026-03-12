@@ -255,7 +255,7 @@ app = FastAPI(
 )
 
 # ================================================
-# ✅ FIXED: CORS middleware using environment variable
+# ✅ FIXED: CORS middleware with explicit OPTIONS handling
 # ================================================
 
 # Get allowed origins from environment variable
@@ -274,9 +274,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Explicitly include OPTIONS
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,  # Cache preflight requests for 10 minutes
 )
+
+# @app.options decorator to explicitly handle OPTIONS requests if needed
+@app.options("/{rest_of_path:path}")
+async def preflight_handler():
+    return None
 
 # -------------------- Include Routers --------------------
 # ✅ All auth endpoints are in auth.router
