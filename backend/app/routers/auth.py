@@ -47,6 +47,26 @@ from ..utils.security import (
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 logger = logging.getLogger(__name__)
 
+# ================================================
+# ✅ CORS Preflight Handlers - NO AUTHENTICATION REQUIRED
+# ================================================
+
+@router.options("/{rest_of_path:path}")
+@router.options("/debug-token-test")
+@router.options("/validate-token")
+@router.options("/register")
+@router.options("/login")
+@router.options("/send-mfa-code")
+@router.options("/verify-mfa")
+@router.options("/forgot-password")
+@router.options("/reset-password")
+@router.options("/setup-mfa")
+@router.options("/disable-mfa")
+@router.options("/mfa-status")
+async def options_handler():
+    """Handle OPTIONS preflight requests without authentication"""
+    return {}
+
 # -------------------------------
 # DEBUG ENDPOINT - ADD THIS FIRST
 # -------------------------------
