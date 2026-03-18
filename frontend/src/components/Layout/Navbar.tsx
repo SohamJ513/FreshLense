@@ -7,6 +7,11 @@ import {
   Button,
   Box,
 } from '@mui/material';
+import {
+  Analytics as AnalyticsIcon,
+  Dashboard as DashboardIcon,
+  FactCheck as FactCheckIcon
+} from '@mui/icons-material';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -41,7 +46,7 @@ const Navbar: React.FC = () => {
         </Typography>
         
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mr: 2 }}>
-          {/* Navigation Links */}
+          {/* Dashboard Link */}
           <Button 
             color="inherit" 
             component={Link}
@@ -52,9 +57,26 @@ const Navbar: React.FC = () => {
               color: 'white'
             }}
           >
+            <DashboardIcon sx={{ mr: 0.5, fontSize: 18 }} />
             Dashboard
           </Button>
           
+          {/* Analytics Link - NEW */}
+          <Button 
+            color="inherit" 
+            component={Link}
+            to="/analytics"
+            variant={location.pathname === '/analytics' ? 'outlined' : 'text'}
+            sx={{ 
+              border: location.pathname === '/analytics' ? '1px solid white' : 'none',
+              color: 'white'
+            }}
+          >
+            <AnalyticsIcon sx={{ mr: 0.5, fontSize: 18 }} />
+            Analytics
+          </Button>
+          
+          {/* Direct Fact Check Link */}
           <Button 
             color="inherit" 
             component={Link}
@@ -65,6 +87,7 @@ const Navbar: React.FC = () => {
               color: 'white'
             }}
           >
+            <FactCheckIcon sx={{ mr: 0.5, fontSize: 18 }} />
             Direct Fact Check
           </Button>
         </Box>

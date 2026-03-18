@@ -1,3 +1,4 @@
+# backend/app/main.py
 from fastapi import FastAPI, HTTPException, Depends, status, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
@@ -64,7 +65,7 @@ from .scheduler import MonitoringScheduler
 from .crawler import ContentFetcher
 
 # ✅ Import routers
-from .routers import fact_check, auth, pages  # ✅ ADDED: Import pages router
+from .routers import fact_check, auth, pages, analytics  # ✅ ADDED: analytics router
 
 # ✅ Import security utilities
 from .utils.security import get_current_user
@@ -291,6 +292,9 @@ app.include_router(auth.router)
 
 # ✅ Include pages router for page management
 app.include_router(pages.router)
+
+# ✅ Include analytics router for dashboard analytics
+app.include_router(analytics.router)
 
 # -------------------- Tracked Pages Routes --------------------
 @app.get("/api/pages", response_model=List[TrackedPageResponse])

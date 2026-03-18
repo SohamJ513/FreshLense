@@ -13,6 +13,7 @@ import ResetPassword from './components/Auth/ResetPassword';
 import Dashboard from './components/Dashboard/Dashboard';
 import FactCheckPage from './pages/FactCheckPage';
 import DirectFactCheckPage from './pages/DirectFactCheckPage';
+import { AnalyticsPage } from './pages/AnalyticsPage'; // ✅ ADDED
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 const theme = createTheme({
@@ -173,6 +174,15 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <Dashboard />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* ✅ ANALYTICS ROUTE - NEW */}
+            <Route path="/analytics" element={
+              <ProtectedRoute>
+                <Layout>
+                  <AnalyticsPage />
                 </Layout>
               </ProtectedRoute>
             } />
