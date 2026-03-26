@@ -226,6 +226,7 @@ export interface TrackedPage {
   last_checked: string | null;
   last_change_detected: string | null;
   current_version_id: string | null;
+  version_count?: number;
 }
 
 export interface PageVersion {
@@ -233,12 +234,21 @@ export interface PageVersion {
   page_id: string;
   timestamp: string;
   text_content: string;
+  change_significance_score?: number;
+  has_ai_summary?: boolean;
   metadata: {
     url: string;
     content_length: number;
     word_count: number;
     fetched_at: string;
+    store_reason?: string;
   };
+}
+
+export interface VersionDetail extends PageVersion {
+  html_content?: string;
+  change_metrics?: any;
+  ai_summary?: any;
 }
 
 export interface ChangeLog {
@@ -249,6 +259,7 @@ export interface ChangeLog {
   timestamp: string;
   description: string | null;
   semantic_similarity_score: number | null;
+  change_significance_score?: number;
 }
 
 export interface LoginResponse {
@@ -272,12 +283,16 @@ export interface CrawlPageResponse {
   url: string;
   version_id: string;
   change_detected: boolean;
+  ai_summary_generated?: boolean;
 }
 
 export interface HealthResponse {
   status: string;
   timestamp: string;
   scheduler_running: boolean;
+  email_enabled: boolean;
+  ai_enabled?: boolean;
+  version: string;
 }
 
 export interface DeleteResponse {
@@ -341,6 +356,48 @@ export interface ValidateTokenResponse {
   valid: boolean;
   email?: string;
   exp?: number;
+}
+
+// ✅ NEW: AI Summary Types
+export interface AISummary {
+  summary: string;
+  key_changes: string[];
+  change_type: 'major' | 'minor' | 'cosmetic';
+  technical_impact: string;
+  sentiment: 'positive' | 'negative' | 'neutral';
+  recommendation: string;
+  tokens_used?: number;
+  generated_at?: string;
+  model_used?: string;
+  error?: string;
+  is_fallback?: boolean;
+  disabled?: boolean;
+}
+
+export interface AISummaryResponse {
+  success: boolean;
+  data: {
+    has_summary: boolean;
+    summary?: AISummary;
+    generated_at?: string;
+    model_used?: string;
+    message?: string;
+  };
+}
+
+export interface AIStatusResponse {
+  enabled: boolean;
+  model: string;
+  summaries_enabled: boolean;
+  api_key_configured: boolean;
+}
+
+export interface RegenerateSummaryResponse {
+  success: boolean;
+  data: {
+    summary: AISummary;
+    message: string;
+  };
 }
 
 // ---------------- Auth API ----------------
@@ -432,7 +489,15 @@ export const pagesAPI = {
   
   delete: (id: string) => api.delete<DeleteResponse>(`/pages/${id}`),
   
-  getVersions: (pageId: string) => api.get<PageVersion[]>(`/pages/${pageId}/versions`),
+  getVersions: (pageId: string, limit: number = 10, includeSummary: boolean = false) => 
+    api.get<{ success: boolean; data: PageVersion[] }>(
+      `/pages/${pageId}/versions?limit=${limit}&include_summary=${includeSummary}`
+    ),
+  
+  getVersion: (pageId: string, versionId: string, includeSummary: boolean = true) =>
+    api.get<{ success: boolean; data: VersionDetail }>(
+      `/pages/${pageId}/versions/${versionId}?include_summary=${includeSummary}`
+    ),
   
   getByUrl: (url: string) => api.get<TrackedPage>(`/pages/by-url?url=${encodeURIComponent(url)}`),
 };
@@ -449,13 +514,46 @@ export const crawlAPI = {
       params: { url } 
     }),
   
-  crawlPage: (pageId: string) => 
-    api.post<CrawlPageResponse>(`/crawl/${pageId}`),
+  crawlPage: (pageId: string, generateAiSummary: boolean = true) => 
+    api.post<CrawlPageResponse>(`/crawl/${pageId}?generate_ai_summary=${generateAiSummary}`),
 };
 
 // ---------------- Health API ----------------
 export const healthAPI = {
   check: () => api.get<HealthResponse>('/health'),
+};
+
+// ---------------- AI Summary API ----------------
+export const aiAPI = {
+  /**
+   * Get AI summary for a specific version
+   */
+  getVersionSummary: (pageId: string, versionId: string): Promise<AISummaryResponse> => 
+    api.get(`/pages/${pageId}/versions/${versionId}/summary`).then(res => res.data),
+
+  /**
+   * Regenerate AI summary for a version
+   */
+  regenerateSummary: (pageId: string, versionId: string): Promise<RegenerateSummaryResponse> => 
+    api.post(`/pages/${pageId}/versions/${versionId}/regenerate-summary`).then(res => res.data),
+
+  /**
+   * Get AI service status
+   */
+  getAIStatus: (): Promise<AIStatusResponse> => 
+    api.get('/ai/status').then(res => res.data),
+
+  /**
+   * Compare two versions with AI summary
+   */
+  compareVersions: (pageId: string, version1Id: string, version2Id: string): Promise<any> => 
+    api.get(`/pages/${pageId}/versions/compare/${version1Id}/${version2Id}`).then(res => res.data),
+
+  /**
+   * Get versions with AI summaries
+   */
+  getVersionsWithSummaries: (pageId: string, limit: number = 10): Promise<{ success: boolean; data: PageVersion[] }> => 
+    api.get(`/pages/${pageId}/versions?include_summary=true&limit=${limit}`).then(res => res.data),
 };
 
 // ---------------- MFA API Functions (for backward compatibility) ----------------

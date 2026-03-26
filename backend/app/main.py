@@ -38,6 +38,7 @@ logging.getLogger("app").setLevel(logging.INFO)
 logging.getLogger("app.scheduler").setLevel(logging.WARNING)
 logging.getLogger("app.crawler").setLevel(logging.WARNING)
 logging.getLogger("app.services").setLevel(logging.WARNING)
+logging.getLogger("app.ai_service").setLevel(logging.INFO)  # AI service logging
 logging.getLogger("app.auth").setLevel(logging.WARNING)  # Reduce auth logs
 logging.getLogger("app.database").setLevel(logging.WARNING)
 logging.getLogger("app.utils").setLevel(logging.WARNING)
@@ -51,25 +52,31 @@ file_handler.setFormatter(file_formatter)
 # Add file handler to specific loggers for detailed debugging
 logging.getLogger("app").addHandler(file_handler)
 logging.getLogger("app.scheduler").addHandler(file_handler)
+logging.getLogger("app.ai_service").addHandler(file_handler)
 
 # Create logger for this module
 logger = logging.getLogger(__name__)
 
-# ✅ Import database functions (for pages only)
+# ✅ Import database functions
 from .database import (
     get_tracked_pages, get_tracked_page, create_tracked_page, update_tracked_page,
     get_page_versions, create_change_log, get_change_logs_for_user, create_page_version,
-    get_tracked_page_by_url, get_user_page_count, delete_tracked_page
+    get_tracked_page_by_url, get_user_page_count, delete_tracked_page,
+    get_db, versions_collection, pages_collection, change_logs_collection
 )
 from .scheduler import MonitoringScheduler
 from .crawler import ContentFetcher
 
 # ✅ Import routers
-from .routers import fact_check, auth, pages, analytics  # ✅ ADDED: analytics router
+from .routers import fact_check, auth, pages, analytics
+
+# ✅ Import services
+from .services.ai_service import ai_service
+from .services.versioning_service import VersioningService
 
 # ✅ Import security utilities
 from .utils.security import get_current_user
-from .models import User as UserModel  # Import User model
+from .models import User as UserModel
 
 # -------------------- Helper function to get user ID --------------------
 def get_user_id_from_current_user(current_user) -> str:
@@ -120,9 +127,29 @@ def check_email_configuration():
         logger.info("Email notifications: DISABLED (EMAIL_ENABLED=false)")
         return False
 
-# Instantiate scheduler and crawler
+# -------------------- AI Configuration Check --------------------
+def check_ai_configuration():
+    """Check and log AI service configuration status"""
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    ai_enabled = os.getenv("AI_SUMMARIES_ENABLED", "true").lower() == "true"
+    
+    if ai_enabled:
+        if openai_api_key:
+            logger.info("AI summaries: ENABLED with Groq")
+            logger.info(f"   Model: {os.getenv('OPENAI_MODEL', 'gpt-5-nano')}")
+            return True
+        else:
+            logger.warning("AI_SUMMARIES_ENABLED=true but OPENAI_API_KEY missing!")
+            logger.warning("   Add OPENAI_API_KEY to your .env file")
+            return False
+    else:
+        logger.info("AI summaries: DISABLED (AI_SUMMARIES_ENABLED=false)")
+        return False
+
+# Instantiate services
 monitoring_scheduler = MonitoringScheduler()
 crawler = ContentFetcher()
+versioning_service = VersioningService()
 
 # -------------------- Page Models --------------------
 class TrackedPageCreate(BaseModel):
@@ -141,6 +168,7 @@ class TrackedPageResponse(BaseModel):
     last_checked: Optional[datetime] = None
     last_change_detected: Optional[datetime] = None
     current_version_id: Optional[str] = None
+    version_count: Optional[int] = 0
 
 class PageVersionResponse(BaseModel):
     id: str
@@ -148,6 +176,8 @@ class PageVersionResponse(BaseModel):
     timestamp: datetime
     text_content: str
     metadata: dict
+    change_significance_score: Optional[float] = 0
+    has_ai_summary: Optional[bool] = False
 
 class ChangeLogResponse(BaseModel):
     id: str
@@ -157,6 +187,7 @@ class ChangeLogResponse(BaseModel):
     timestamp: datetime
     description: Optional[str] = None
     semantic_similarity_score: Optional[float] = None
+    change_significance_score: Optional[float] = 0
 
 def normalize_doc(doc: dict) -> dict:
     """Convert MongoDB _id -> id (string) for API responses"""
@@ -199,10 +230,22 @@ async def lifespan(app: FastAPI):
     # Check email configuration
     email_configured = check_email_configuration()
     
+    # Check AI configuration
+    ai_configured = check_ai_configuration()
+    
     # Check database connection
     from .database import is_db_available
     if is_db_available():
         print("Database connection: ACTIVE")
+        
+        # Set up versioning service collections
+        db = get_db()
+        versioning_service.set_collections(
+            versions_coll=db.page_versions,
+            pages_coll=db.tracked_pages,
+            change_logs_coll=db.change_logs
+        )
+        print("✅ Versioning service initialized with database collections")
     else:
         print("Database connection: FAILED")
     
@@ -250,13 +293,13 @@ async def lifespan(app: FastAPI):
 # -------------------- Create FastAPI app --------------------
 app = FastAPI(
     title="FreshLense API",
-    description="API for web content monitoring platform",
-    version="1.0.0",
+    description="API for web content monitoring platform with AI-powered summaries",
+    version="1.1.0",  # Updated version
     lifespan=lifespan
 )
 
 # ================================================
-# ✅ FIXED: CORS middleware with explicit OPTIONS handling
+# CORS middleware with explicit OPTIONS handling
 # ================================================
 
 # Get allowed origins from environment variable
@@ -275,26 +318,21 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],  # Explicitly include OPTIONS
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
     expose_headers=["*"],
-    max_age=600,  # Cache preflight requests for 10 minutes
+    max_age=600,
 )
 
-# @app.options decorator to explicitly handle OPTIONS requests if needed
 @app.options("/{rest_of_path:path}")
 async def preflight_handler():
     return None
 
 # -------------------- Include Routers --------------------
-# ✅ All auth endpoints are in auth.router
 app.include_router(auth.router)
-
-# ✅ Include pages router for page management
 app.include_router(pages.router)
-
-# ✅ Include analytics router for dashboard analytics
 app.include_router(analytics.router)
+app.include_router(fact_check.router, dependencies=[Depends(get_current_user)])
 
 # -------------------- Tracked Pages Routes --------------------
 @app.get("/api/pages", response_model=List[TrackedPageResponse])
@@ -305,6 +343,14 @@ async def get_my_pages(current_user = Depends(get_current_user)):
     
     logger.debug(f"Fetching pages for user: {user_email}")
     pages_list = get_tracked_pages(user_id)
+    
+    # Add version count to each page
+    db = get_db()
+    for page in pages_list:
+        page['version_count'] = db.page_versions.count_documents(
+            {"page_id": ObjectId(page['_id'])}
+        )
+    
     logger.debug(f"Found {len(pages_list)} pages for {user_email}")
     return [normalize_doc(p) for p in pages_list]
 
@@ -356,14 +402,19 @@ async def delete_page(page_id: str, current_user = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Invalid page ID")
     
     page = get_tracked_page(page_id)
-    if not page or str(page["user_id"]) != user_id:  # ← FIXED
+    if not page or str(page["user_id"]) != user_id:
         raise HTTPException(status_code=404, detail="Page not found")
     
+    # Delete all versions first
+    db = get_db()
+    db.page_versions.delete_many({"page_id": ObjectId(page_id)})
+    
+    # Then delete the page
     success = delete_tracked_page(page_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete page")
     
-    return {"status": "success", "message": "Page deleted successfully"}
+    return {"status": "success", "message": "Page and all versions deleted successfully"}
 
 @app.get("/api/pages/by-url", response_model=TrackedPageResponse)
 async def get_page_by_url(
@@ -389,10 +440,19 @@ async def get_page(page_id: str, current_user = Depends(get_current_user)):
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
     page = get_tracked_page(page_id)
-    if not page or str(page["user_id"]) != user_id:  # ← FIXED
+    if not page or str(page["user_id"]) != user_id:
         raise HTTPException(status_code=404, detail="Page not found")
+    
+    # Add version count
+    db = get_db()
+    page['version_count'] = db.page_versions.count_documents(
+        {"page_id": ObjectId(page_id)}
+    )
+    
     return normalize_doc(page)
 
+# Note: The versions endpoint is now handled by the pages router
+# This endpoint is kept for backward compatibility
 @app.get("/api/pages/{page_id}/versions", response_model=List[PageVersionResponse])
 async def get_versions(page_id: str, current_user = Depends(get_current_user)):
     user_id = get_user_id_from_current_user(current_user)
@@ -402,9 +462,14 @@ async def get_versions(page_id: str, current_user = Depends(get_current_user)):
     except:
         raise HTTPException(status_code=400, detail="Invalid page ID")
     page = get_tracked_page(page_id)
-    if not page or str(page["user_id"]) != user_id:  # ← FIXED
+    if not page or str(page["user_id"]) != user_id:
         raise HTTPException(status_code=404, detail="Page not found")
     versions = get_page_versions(page_id)
+    
+    # Add AI summary info
+    for v in versions:
+        v['has_ai_summary'] = 'ai_summary' in v
+    
     return [normalize_doc(v) for v in versions]
 
 # -------------------- Change Logs Routes --------------------
@@ -414,37 +479,14 @@ async def get_my_changes(current_user = Depends(get_current_user)):
     changes = get_change_logs_for_user(user_id)
     return [normalize_doc(c) for c in changes]
 
-# -------------------- Fact Check Routes --------------------
-# ✅ Include fact check router with authentication
-app.include_router(fact_check.router, dependencies=[Depends(get_current_user)])
-
-# -------------------- Crawl Routes --------------------
-@app.post("/api/crawl")
-async def crawl_url(
-    url: str = Query(..., description="URL to crawl"),
+# -------------------- Crawl Routes with AI Integration --------------------
+@app.post("/api/crawl/{page_id}")
+async def crawl_page_by_id(
+    page_id: str, 
+    generate_ai_summary: bool = Query(True, description="Generate AI summary for significant changes"),
     current_user = Depends(get_current_user)
 ):
-    """Trigger a manual crawl for a given URL (no DB save)"""
-    try:
-        html_content, text_content = crawler.fetch_and_extract(url)
-        if not html_content:
-            raise HTTPException(status_code=400, detail="Failed to fetch content from URL")
-
-        return {
-            "status": "success",
-            "url": url,
-            "html_content_length": len(html_content) if html_content else 0,
-            "text_content_length": len(text_content) if text_content else 0,
-            "text_content_preview": text_content[:300] if text_content else None,
-            "full_text_content": text_content
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/crawl/{page_id}")
-async def crawl_page_by_id(page_id: str, current_user = Depends(get_current_user)):
-    """Trigger a manual crawl for a tracked page by its ID and store results"""
+    """Trigger a manual crawl for a tracked page by its ID and store results with AI summary"""
     user_id = get_user_id_from_current_user(current_user)
     
     try:
@@ -453,7 +495,7 @@ async def crawl_page_by_id(page_id: str, current_user = Depends(get_current_user
         raise HTTPException(status_code=400, detail="Invalid page ID")
 
     page = get_tracked_page(page_id)
-    if not page or str(page["user_id"]) != user_id:  # ← FIXED (MAIN FIX)
+    if not page or str(page["user_id"]) != user_id:
         raise HTTPException(status_code=404, detail="Page not found")
 
     try:
@@ -461,44 +503,46 @@ async def crawl_page_by_id(page_id: str, current_user = Depends(get_current_user
         if not html_content:
             raise HTTPException(status_code=400, detail="Failed to fetch content from URL")
 
-        new_version = create_page_version(
+        # Use versioning service with AI
+        version_id = await versioning_service.save_version_if_significant(
             page_id=page_id,
+            new_content=text_content,
             html_content=html_content,
-            text_content=text_content,
-            url=page["url"]
+            url=page["url"],
+            user_id=user_id,
+            generate_ai_summary=generate_ai_summary
         )
-        
-        if not new_version:
-            raise HTTPException(status_code=500, detail="Failed to save page version")
 
-        update_data = {
-            "last_checked": datetime.utcnow(),
-            "current_version_id": str(new_version["_id"])
-        }
-
-        versions = get_page_versions(page_id)
-        if len(versions) > 1 and versions[-2]["text_content"] != text_content:
-            update_data["last_change_detected"] = datetime.utcnow()
-            create_change_log({
-                "page_id": ObjectId(page_id),
-                "user_id": user_id,
-                "type": "manual_crawl",
-                "timestamp": datetime.utcnow(),
-                "description": "Content changed on manual crawl"
-            })
-
-        update_tracked_page(page_id, update_data)
+        if not version_id:
+            return {
+                "status": "no_changes",
+                "page_id": page_id,
+                "url": page["url"],
+                "message": "No significant changes detected"
+            }
 
         return {
             "status": "success",
             "page_id": page_id,
             "url": page["url"],
-            "version_id": str(new_version["_id"]),
-            "change_detected": "last_change_detected" in update_data
+            "version_id": version_id,
+            "change_detected": True,
+            "ai_summary_generated": generate_ai_summary
         }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------- AI Status Endpoint --------------------
+@app.get("/api/ai/status")
+async def get_ai_status(current_user = Depends(get_current_user)):
+    """Get AI service status and configuration"""
+    return {
+        "enabled": ai_service.enabled,
+        "model": os.getenv("OPENAI_MODEL", "gpt-5-nano"),
+        "summaries_enabled": os.getenv("AI_SUMMARIES_ENABLED", "true").lower() == "true",
+        "api_key_configured": bool(os.getenv("OPENAI_API_KEY"))
+    }
 
 # -------------------- Debug & Test Routes --------------------
 @app.get("/api/debug/email-config")
@@ -556,7 +600,7 @@ async def test_email_send(request: Request):
                 <ul>
                     <li>Direct fact-check results</li>
                     <li>Page change notifications</li>
-                    <li>Monitoring alerts</li>
+                    <li>AI-powered change summaries</li>
                 </ul>
             </body>
             </html>
@@ -571,7 +615,7 @@ Test Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
 You will now receive:
 - Direct fact-check results
 - Page change notifications
-- Monitoring alerts
+- AI-powered change summaries
 
 This is a test email from FreshLense."""
         }
@@ -600,7 +644,8 @@ async def health_check():
         "timestamp": datetime.utcnow().isoformat(), 
         "scheduler_running": monitoring_scheduler.is_running,
         "email_enabled": getattr(monitoring_scheduler, 'email_enabled', False),
-        "version": "1.0.0"
+        "ai_enabled": ai_service.enabled,
+        "version": "1.1.0"
     }
 
 @app.get("/")
@@ -608,16 +653,17 @@ async def root():
     """Root endpoint with API information"""
     return {
         "message": "FreshLense API is running!",
-        "version": "1.0.0",
+        "version": "1.1.0",
+        "features": {
+            "email_notifications": getattr(monitoring_scheduler, 'email_enabled', False),
+            "scheduler_active": monitoring_scheduler.is_running,
+            "ai_summaries": ai_service.enabled
+        },
         "endpoints": {
             "documentation": "/docs",
             "health": "/api/health",
+            "ai_status": "/api/ai/status",
             "email_config": "/api/debug/email-config",
-            "test_email": "POST /api/test/email",
-            "token_debug": "POST /api/auth/debug-token?token=YOUR_TOKEN"
-        },
-        "features": {
-            "email_notifications": getattr(monitoring_scheduler, 'email_enabled', False),
-            "scheduler_active": monitoring_scheduler.is_running
+            "test_email": "POST /api/test/email"
         }
     }

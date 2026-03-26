@@ -12,6 +12,7 @@ from ..database import (
 )
 from ..services.fact_check_service import FactCheckService
 from ..services.diff_service import DiffService
+from ..services.ai_service import ai_service  # ✅ ADDED: Import AI service
 from ..schemas.fact_check import FactCheckRequest, FactCheckResponse, FactCheckItem, ClaimType, Verdict
 from ..schemas.diff import DiffRequest, DiffResponse, ContentChange, VersionInfo
 import resend
@@ -425,10 +426,10 @@ async def fact_check_direct_content(request: dict, current_user: dict = Depends(
         print(f"💥 Direct fact checking failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Direct fact checking failed: {str(e)}")
 
-# ✅ ENHANCED ENDPOINT: Compare versions WITH SIGNIFICANCE ANALYSIS
+# ✅ ENHANCED ENDPOINT: Compare versions WITH SIGNIFICANCE ANALYSIS AND AI SUMMARY
 @router.post("/compare", response_model=DiffResponse)
 async def compare_versions(request: DiffRequest, current_user: dict = Depends(lambda: None)):
-    """Compare two page versions and show differences WITH SIGNIFICANCE ANALYSIS"""
+    """Compare two page versions and show differences WITH SIGNIFICANCE ANALYSIS AND AI SUMMARY"""
     try:
         old_version = versions_collection.find_one({"_id": ObjectId(request.old_version_id)})
         new_version = versions_collection.find_one({"_id": ObjectId(request.new_version_id)})
@@ -442,15 +443,32 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
         old_text = old_version.get("text_content", "")
         new_text = new_version.get("text_content", "")
         
-        # ✅ ADDED: Significance analysis
+        # Get page details for AI summary
+        page = get_tracked_page(str(old_version["page_id"]))
+        page_title = page.get("display_name") or page.get("url", "") if page else ""
+        page_url = page.get("url", "") if page else ""
+        
+        # ✅ ADDED: Generate AI summary
+        ai_summary = None
+        try:
+            ai_summary = await ai_service.generate_change_summary(
+                old_content=old_text,
+                new_content=new_text,
+                page_title=page_title,
+                url=page_url
+            )
+            print(f"✅ AI summary generated for comparison")
+        except Exception as ai_error:
+            print(f"⚠️ Failed to generate AI summary: {ai_error}")
+            ai_summary = None
+        
+        # Significance analysis
         significance_analysis = diff_service.analyze_change_significance(old_text, new_text)
         
         diff_result = diff_service.compare_text(old_text, new_text)
         metrics = diff_service.calculate_change_metrics(old_text, new_text)
         html_diff = diff_service.generate_html_diff(old_text, new_text)
         side_by_side = diff_service.get_side_by_side_diff(old_text, new_text)
-        
-        page = get_tracked_page(str(old_version["page_id"]))
         
         return DiffResponse(
             page_id=str(old_version["page_id"]),
@@ -464,11 +482,13 @@ async def compare_versions(request: DiffRequest, current_user: dict = Depends(la
             html_diff=html_diff,
             side_by_side_diff=side_by_side,
             has_changes=len(diff_result) > 0,
-            # ✅ ADDED: Significance info
+            # Significance info
             significance_analysis=significance_analysis,
             old_version_significance=old_version.get("change_significance_score", 0.0),
             new_version_significance=new_version.get("change_significance_score", 0.0),
-            should_store_version=significance_analysis.get("store", False)
+            should_store_version=significance_analysis.get("store", False),
+            # ✅ ADDED: AI Summary
+            ai_summary=ai_summary
         )
         
     except Exception as e:
@@ -520,7 +540,7 @@ async def get_versioning_stats(page_id: str, current_user: dict = Depends(lambda
                 )
             },
             "versioning_config": config,
-            "recommendations": self._generate_versioning_recommendations(
+            "recommendations": _generate_versioning_recommendations(
                 total_versions, significant_versions, efficiency, config
             )
         }
@@ -529,7 +549,7 @@ async def get_versioning_stats(page_id: str, current_user: dict = Depends(lambda
         print(f"💥 Error getting versioning stats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get versioning stats: {str(e)}")
 
-def _generate_versioning_recommendations(self, total: int, significant: int, efficiency: float, config: dict) -> List[str]:
+def _generate_versioning_recommendations(total: int, significant: int, efficiency: float, config: dict) -> List[str]:
     """Generate recommendations for versioning optimization"""
     recommendations = []
     

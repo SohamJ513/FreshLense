@@ -1,3 +1,4 @@
+# backend/app/database.py
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError, ConnectionFailure, ServerSelectionTimeoutError
 from datetime import datetime, timedelta
@@ -30,6 +31,7 @@ try:
     pages_collection = db['tracked_pages']
     versions_collection = db['page_versions']
     changes_collection = db['change_logs']
+    change_logs_collection = changes_collection
     password_reset_tokens_collection = db['password_reset_tokens']
     audit_logs_collection = db['audit_logs']
 
@@ -45,12 +47,16 @@ try:
         pages_collection.create_index([("user_id", ASCENDING), ("url", ASCENDING)], unique=True)
         pages_collection.create_index([("user_id", ASCENDING), ("is_active", ASCENDING)])
         
-        # ✅ ENHANCED: Versions indexes for smart versioning
+        # ✅ ENHANCED: Versions indexes for smart versioning and AI summaries
         versions_collection.create_index([("page_id", ASCENDING), ("timestamp", DESCENDING)])
         versions_collection.create_index([("page_id", ASCENDING), ("change_significance_score", DESCENDING)])
         versions_collection.create_index([("page_id", ASCENDING), ("checksum", ASCENDING)])
         versions_collection.create_index([("page_id", ASCENDING), ("content_hash", ASCENDING)])
         versions_collection.create_index([("change_significance_score", DESCENDING)])
+        
+        # ✅ NEW: Indexes for AI summary queries
+        versions_collection.create_index([("page_id", ASCENDING), ("ai_summary", ASCENDING)])
+        versions_collection.create_index([("ai_summary.generated_at", DESCENDING)])
         
         # Changes indexes
         changes_collection.create_index([("user_id", ASCENDING), ("timestamp", DESCENDING)])
@@ -66,7 +72,7 @@ try:
         audit_logs_collection.create_index([("user_id", ASCENDING)])
         audit_logs_collection.create_index([("operation", ASCENDING)])
         
-        print("✅ Database indexes created successfully with SMART VERSIONING support!")
+        print("✅ Database indexes created successfully with SMART VERSIONING and AI SUPPORT!")
 
     create_indexes()
 
@@ -693,7 +699,7 @@ def get_user_page_count(user_id: str) -> int:
         return 0
 
 
-# ---------------- Page Versions - UPDATED FOR SMART VERSIONING ----------------
+# ---------------- Page Versions - UPDATED FOR SMART VERSIONING AND AI SUMMARIES ----------------
 def create_page_version(
     page_id: str, 
     text_content: str, 
@@ -701,9 +707,10 @@ def create_page_version(
     html_content: str = None,
     significance_score: float = 1.0,
     change_metrics: Optional[Dict[str, Any]] = None,
-    metadata: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None,
+    ai_summary: Optional[Dict[str, Any]] = None  # ✅ NEW: AI summary parameter
 ):
-    """✅ UPDATED: Create a new page version with smart versioning fields"""
+    """✅ UPDATED: Create a new page version with smart versioning and AI summary fields"""
     if db is None:
         return None
     
@@ -733,6 +740,10 @@ def create_page_version(
             "similarity_score": 100.0,
             "change_percentage": 0.0
         },
+        
+        # ✅ NEW: AI Summary field
+        "ai_summary": ai_summary,
+        
         "metadata": {
             "url": url,
             "content_length": len(text_content),
@@ -748,15 +759,32 @@ def create_page_version(
         result = versions_collection.insert_one(version)
         version["_id"] = result.inserted_id
         
-        print(f"✅ Created version {version['_id']} for page {page_id} with significance score: {significance_score}")
+        summary_status = "with AI summary" if ai_summary else "without AI summary"
+        print(f"✅ Created version {version['_id']} for page {page_id} {summary_status} (significance: {significance_score})")
         return version
     except Exception as e:
         print(f"❌ Error creating page version: {e}")
         return None
 
 
-def get_page_versions(page_id: str, limit: int = 10, significant_only: bool = False):
-    """✅ UPDATED: Get page versions for a specific page with filtering"""
+def update_version_with_ai_summary(version_id: str, ai_summary: Dict[str, Any]) -> bool:
+    """✅ NEW: Update a version with an AI summary"""
+    if db is None:
+        return False
+    
+    try:
+        result = versions_collection.update_one(
+            {"_id": ObjectId(version_id)},
+            {"$set": {"ai_summary": ai_summary}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating version with AI summary: {e}")
+        return False
+
+
+def get_page_versions(page_id: str, limit: int = 10, significant_only: bool = False, with_ai_summary_only: bool = False):
+    """✅ UPDATED: Get page versions for a specific page with filtering options"""
     if db is None:
         return []
     
@@ -764,6 +792,8 @@ def get_page_versions(page_id: str, limit: int = 10, significant_only: bool = Fa
         query = {"page_id": ObjectId(page_id)}
         if significant_only:
             query["change_significance_score"] = {"$gte": 0.3}
+        if with_ai_summary_only:
+            query["ai_summary"] = {"$exists": True, "$ne": None}
         
         versions = versions_collection.find(query).sort("timestamp", DESCENDING).limit(limit)
         return list(versions)
@@ -772,8 +802,13 @@ def get_page_versions(page_id: str, limit: int = 10, significant_only: bool = Fa
         return []
 
 
+def get_versions_with_ai_summaries(page_id: str, limit: int = 10):
+    """✅ NEW: Get versions that have AI summaries"""
+    return get_page_versions(page_id, limit=limit, with_ai_summary_only=True)
+
+
 def get_significant_page_versions(page_id: str, limit: int = 10):
-    """✅ NEW: Get only significant versions for a page"""
+    """✅ Get only significant versions for a page"""
     return get_page_versions(page_id, limit=limit, significant_only=True)
 
 
@@ -846,8 +881,8 @@ def get_version_by_id(version_id: str):
         return None
 
 
-def prune_old_versions(page_id: str, keep_count: int = 50, keep_significant: bool = True):
-    """✅ NEW: Prune old versions, keeping only the most important ones"""
+def prune_old_versions(page_id: str, keep_count: int = 50, keep_significant: bool = True, keep_versions_with_ai: bool = True):
+    """✅ UPDATED: Prune old versions, keeping important ones and those with AI summaries"""
     if db is None:
         return 0
     
@@ -871,6 +906,14 @@ def prune_old_versions(page_id: str, keep_count: int = 50, keep_significant: boo
         if keep_significant:
             for version in all_versions:
                 if version.get("change_significance_score", 0) >= 0.3:
+                    version_id = str(version["_id"])
+                    if version_id not in versions_to_keep:
+                        versions_to_keep.append(version_id)
+        
+        # Keep versions with AI summaries
+        if keep_versions_with_ai:
+            for version in all_versions:
+                if version.get("ai_summary") is not None:
                     version_id = str(version["_id"])
                     if version_id not in versions_to_keep:
                         versions_to_keep.append(version_id)
@@ -906,7 +949,7 @@ def prune_old_versions(page_id: str, keep_count: int = 50, keep_significant: boo
 
 
 def get_versioning_statistics(page_id: str):
-    """✅ NEW: Get statistics about versions for a page"""
+    """✅ UPDATED: Get statistics about versions for a page including AI summary stats"""
     if db is None:
         return {}
     
@@ -917,6 +960,7 @@ def get_versioning_statistics(page_id: str):
         
         total_versions = len(all_versions)
         significant_versions = len([v for v in all_versions if v.get("change_significance_score", 0) >= 0.3])
+        versions_with_ai = len([v for v in all_versions if v.get("ai_summary") is not None])
         
         avg_significance = 0.0
         if total_versions > 0:
@@ -928,10 +972,12 @@ def get_versioning_statistics(page_id: str):
         return {
             "total_versions": total_versions,
             "significant_versions": significant_versions,
+            "versions_with_ai_summaries": versions_with_ai,
             "insignificant_versions": total_versions - significant_versions,
             "average_significance_score": round(avg_significance, 3),
             "total_content_size_kb": round(total_size / 1024, 2),
             "storage_efficiency_percentage": round((significant_versions / total_versions * 100) if total_versions > 0 else 100, 1),
+            "ai_coverage_percentage": round((versions_with_ai / total_versions * 100) if total_versions > 0 else 0, 1),
             "oldest_version": all_versions[-1]["timestamp"] if all_versions else None,
             "newest_version": all_versions[0]["timestamp"] if all_versions else None
         }
@@ -1107,7 +1153,7 @@ def get_audit_logs(user_id: str = None, operation: str = None, limit: int = 100)
 
 # ---------------- Database Health Check ----------------
 def check_database_health():
-    """Check database connection and health"""
+    """Check database connection and health - UPDATED with AI summary stats"""
     if db is None:
         return {
             "status": "unhealthy",
@@ -1122,10 +1168,13 @@ def check_database_health():
         page_count = pages_collection.count_documents({})
         mfa_enabled_count = users_collection.count_documents({"mfa_enabled": True, "is_deleted": {"$ne": True}})
         
-        # Version statistics
+        # Version statistics with AI summaries
         total_versions = versions_collection.count_documents({})
         significant_versions = versions_collection.count_documents({"change_significance_score": {"$gte": 0.3}})
+        versions_with_ai = versions_collection.count_documents({"ai_summary": {"$exists": True, "$ne": None}})
+        
         efficiency = (significant_versions / total_versions * 100) if total_versions > 0 else 0
+        ai_coverage = (versions_with_ai / total_versions * 100) if total_versions > 0 else 0
         
         # Check for TTL indexes
         indexes = users_collection.index_information()
@@ -1151,7 +1200,9 @@ def check_database_health():
             "versioning_stats": {
                 "total_versions": total_versions,
                 "significant_versions": significant_versions,
-                "storage_efficiency": round(efficiency, 1)
+                "versions_with_ai_summaries": versions_with_ai,
+                "storage_efficiency": round(efficiency, 1),
+                "ai_coverage_percentage": round(ai_coverage, 1)
             },
             "stats": {
                 "total_pages": page_count,

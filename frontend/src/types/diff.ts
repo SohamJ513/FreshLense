@@ -1,3 +1,6 @@
+// frontend/src/types/diff.ts
+import { AISummary } from './ai'; // ✅ Import AI summary type
+
 export enum ChangeType {
   ADDED = "added",
   REMOVED = "removed", 
@@ -67,6 +70,9 @@ export interface DiffResponse {
   has_changes: boolean;
   change_percentage?: number;
   similarity_score?: number;
+  
+  // ✅ NEW: AI Summary for version comparison
+  ai_summary?: AISummary;
 }
 
 // For API calls
@@ -106,6 +112,10 @@ export interface VersionInfo {
     html_content_length?: number;
     fetched_at?: string;
   };
+  
+  // ✅ NEW: AI summary indicator
+  has_ai_summary?: boolean;
+  ai_summary?: AISummary;
 }
 
 // ✅ ADDED: Page information interface
@@ -143,6 +153,10 @@ export interface VersionDetailResponse {
   page_title: string;
   page_url: string;
   metadata?: Record<string, any>;
+  
+  // ✅ NEW: AI summary for version detail
+  has_ai_summary?: boolean;
+  ai_summary?: AISummary;
 }
 
 // ✅ ADDED: For version comparison in UI
@@ -153,6 +167,9 @@ export interface VersionComparison {
   version2_content: string;
   version1_timestamp: string;
   version2_timestamp: string;
+  
+  // ✅ NEW: AI summary for comparison
+  ai_summary?: AISummary;
 }
 
 // ✅ ADDED: Change metrics for summary display
@@ -173,8 +190,9 @@ export interface VersionFilterOptions {
   start_date?: string;
   end_date?: string;
   has_content?: boolean;
+  has_ai_summary?: boolean; // ✅ NEW: Filter by AI summary presence
   limit?: number;
   offset?: number;
-  sort_by?: 'captured_at' | 'version_number';
+  sort_by?: 'captured_at' | 'version_number' | 'has_ai_summary';
   sort_order?: 'asc' | 'desc';
 }

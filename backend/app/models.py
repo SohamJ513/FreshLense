@@ -194,7 +194,7 @@ class TrackedPageUpdate(BaseModel):
     )
 
 # -------------------------------
-# Page Version Models - UPDATED WITH SMART VERSIONING
+# Page Version Models - UPDATED WITH SMART VERSIONING AND AI SUMMARIES
 # -------------------------------
 class PageVersionBase(BaseModel):
     html_content: Optional[str] = None
@@ -224,6 +224,12 @@ class PageVersion(PageVersionBase):
         "total_words_old": 0,
         "total_words_new": 0
     })
+    
+    # ✅ NEW: AI Summary field for storing AI-generated change summaries
+    ai_summary: Optional[Dict[str, Any]] = Field(
+        default=None, 
+        description="AI-generated summary of changes between versions"
+    )
     
     metadata: Dict[str, Any] = Field(default_factory=lambda: {
         "store_reason": "first_version",
@@ -348,6 +354,22 @@ class SmartVersioningResponse(BaseModel):
     analysis: VersioningAnalysis
     pruned_count: int = Field(default=0)
 
+# ✅ NEW: AI Summary Response Model
+class AISummaryResponse(BaseModel):
+    """Response model for AI-generated summaries"""
+    summary: str
+    key_changes: List[str]
+    change_type: str
+    technical_impact: str
+    sentiment: str
+    recommendation: str
+    tokens_used: Optional[int] = None
+    generated_at: Optional[str] = None
+    model_used: Optional[str] = None
+    error: Optional[str] = None
+    is_fallback: Optional[bool] = False
+    disabled: Optional[bool] = False
+
 # -------------------------------
 # Utility Models
 # -------------------------------
@@ -358,6 +380,7 @@ class ContentComparison(BaseModel):
     old_content: Optional[str] = None
     new_content: Optional[str] = None
     analysis: Optional[VersioningAnalysis] = None
+    ai_summary: Optional[AISummaryResponse] = None
 
 class PruneResult(BaseModel):
     """Result of version pruning"""

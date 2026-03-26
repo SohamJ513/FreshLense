@@ -1,8 +1,39 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import {
+  Box,
+  Container,
+  Paper,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Tab,
+  Tabs,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Stack,
+  alpha,
+  useTheme,
+} from '@mui/material';
+import {
+  ArrowBack as ArrowBackIcon,
+  FactCheck as FactCheckIcon,
+  CompareArrows as CompareIcon,
+  AutoAwesome as AutoAwesomeIcon,
+  History as HistoryIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  TrendingFlat as TrendingFlatIcon,
+} from '@mui/icons-material';
 import { factCheckApi } from '../services/factCheckApi';
 import FactCheckResult from '../components/FactCheck/FactCheckResult';
 import ContentDiffViewer from '../components/FactCheck/ContentDiffViewer';
+import { AISummaryCard } from '../components/AiSummaryCard';
 import { 
   PageVersionsResponse, 
   FactCheckResponse, 
@@ -13,6 +44,7 @@ import { DiffResponse } from '../types/diff';
 const FactCheckPage: React.FC = () => {
   const { pageId } = useParams<{ pageId: string }>();
   const navigate = useNavigate();
+  const theme = useTheme();
   
   const [pageData, setPageData] = useState<PageVersionsResponse | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<string>('');
@@ -21,7 +53,7 @@ const FactCheckPage: React.FC = () => {
   const [factCheckResult, setFactCheckResult] = useState<FactCheckResponse | null>(null);
   const [diffResult, setDiffResult] = useState<DiffResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'factcheck' | 'compare'>('factcheck');
+  const [activeTab, setActiveTab] = useState<number>(0);
 
   useEffect(() => {
     if (pageId) {
@@ -36,7 +68,6 @@ const FactCheckPage: React.FC = () => {
       setLoading(true);
       const data = await factCheckApi.getPageVersions(pageId);
       
-      // Handle both response structures
       const versions = data.versions || data || [];
       const page_info = data.page_info || { 
         page_id: pageId, 
@@ -49,7 +80,6 @@ const FactCheckPage: React.FC = () => {
       setPageData({
         page_info,
         versions: versions.map((v: any, index: number) => ({
-          // New fields from updated API
           id: v.id || v.version_id || `version-${index}`,
           page_id: v.page_id || pageId,
           version_number: v.version_number || index + 1,
@@ -57,8 +87,6 @@ const FactCheckPage: React.FC = () => {
           content_preview: v.content_preview || 'No content available',
           title: v.title || `Version ${v.version_number || index + 1}`,
           has_content: v.has_content !== undefined ? v.has_content : true,
-          
-          // Legacy fields for backward compatibility with existing components
           version_id: v.id || v.version_id || `version-${index}`,
           timestamp: v.captured_at || v.timestamp || new Date().toISOString(),
           word_count: v.word_count || (v.content_preview ? v.content_preview.split(' ').length : 0),
@@ -83,7 +111,6 @@ const FactCheckPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to load page versions:', error);
       
-      // Set fallback data for testing
       setPageData({
         page_info: {
           page_id: pageId || 'unknown',
@@ -136,7 +163,7 @@ const FactCheckPage: React.FC = () => {
       setLoading(true);
       const result = await factCheckApi.runFactCheck(selectedVersion);
       setFactCheckResult(result);
-      setActiveTab('factcheck');
+      setActiveTab(0);
     } catch (error) {
       console.error('Fact check failed:', error);
     } finally {
@@ -149,38 +176,20 @@ const FactCheckPage: React.FC = () => {
     
     try {
       setLoading(true);
-      
-      // Clear previous results
       setDiffResult(null);
       
-      // Call the compare API
-      console.log('Comparing versions:', { oldVersion, newVersion });
       const result = await factCheckApi.compareVersions(oldVersion, newVersion);
-      
-      // Debug log to see what we're getting
-      console.log('Diff result received:', {
-        hasEnhancedData: !!(result.html_diff || result.change_metrics || result.side_by_side_diff),
-        totalChanges: result.total_changes,
-        hasChanges: result.changes.length > 0,
-        changeMetrics: result.change_metrics,
-        hasHtmlDiff: !!result.html_diff,
-        hasSideBySide: !!result.side_by_side_diff,
-        rawData: result
-      });
-      
       setDiffResult(result);
-      setActiveTab('compare');
+      setActiveTab(1);
       
     } catch (error: any) {
       console.error('Comparison failed:', error);
-      console.error('Error details:', error.response?.data || error.message);
       
-      // Fallback: Create a basic diff result if API fails
       const fallbackResult: DiffResponse = {
         page_id: pageId || '',
         old_version_id: oldVersion,
         new_version_id: newVersion,
-        old_timestamp: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+        old_timestamp: new Date(Date.now() - 86400000).toISOString(),
         new_timestamp: new Date().toISOString(),
         changes: [
           {
@@ -202,7 +211,7 @@ const FactCheckPage: React.FC = () => {
       };
       
       setDiffResult(fallbackResult);
-      setActiveTab('compare');
+      setActiveTab(1);
     } finally {
       setLoading(false);
     }
@@ -228,415 +237,352 @@ const FactCheckPage: React.FC = () => {
 
   if (loading && !pageData) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-3"></div>
-          <p className="text-gray-600 text-sm">Loading page data...</p>
-        </div>
-      </div>
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: '#f8fafc' }}>
+        <CircularProgress />
+      </Box>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-6">
-      {/* Global image constraints */}
-      <style>
-        {`
-          .fact-check-content img,
-          .diff-viewer-content img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 0.5rem;
-            border: 1px solid #e5e7eb;
-          }
-          
-          .fact-check-content video,
-          .diff-viewer-content video {
-            max-width: 100%;
-            height: auto;
-            border-radius: 0.5rem;
-          }
-          
-          .fact-check-content .evidence-media,
-          .diff-viewer-content .comparison-media {
-            max-width: 100%;
-            overflow: hidden;
-          }
+    <Box sx={{ minHeight: '100vh', bgcolor: '#f8fafc', py: 4 }}>
+      <Container maxWidth="xl">
+        {/* Back Button */}
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/dashboard')}
+          sx={{ mb: 3, color: '#64748b', '&:hover': { color: '#0f172a' } }}
+        >
+          Back to Dashboard
+        </Button>
 
-          .fact-check-result-item,
-          .diff-viewer-wrapper {
-            max-width: 100%;
-            overflow: hidden;
-          }
-        `}
-      </style>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="mb-8">
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="flex items-center text-sm text-gray-600 hover:text-gray-900 mb-6 transition-colors"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            Back to Dashboard
-          </button>
-          
-          <div className="bg-white rounded-lg border border-gray-200 p-6">
-            <div className="flex items-start justify-between">
-              <div className="space-y-3">
-                <h1 className="text-2xl font-bold text-gray-900">Fact Check & Version Comparison</h1>
-                <div className="space-y-2">
-                  <div className="flex items-center">
-                    <span className="text-sm font-medium text-gray-700 w-16">Page:</span>
-                    <span className="text-sm text-gray-900 bg-gray-100 px-3 py-1 rounded-md">
-                      {pageData?.page_info?.display_name || 'Untitled Page'}
-                    </span>
-                  </div>
-                  <div className="flex items-center">
-                    <span className="text-sm font-medium text-gray-700 w-16">URL:</span>
-                    <a 
-                      href={pageData?.page_info?.url || '#'} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:text-blue-800 underline truncate max-w-md"
-                    >
-                      {pageData?.page_info?.url || 'No URL available'}
-                    </a>
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm text-gray-600">Available Versions</div>
-                <div className="text-2xl font-bold text-gray-900">{pageData?.versions.length || 0}</div>
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Header Card */}
+        <Paper
+          elevation={0}
+          sx={{
+            p: 4,
+            mb: 4,
+            borderRadius: 3,
+            border: '1px solid #e2e8f0',
+            bgcolor: 'white'
+          }}
+        >
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { md: 'center' }, gap: 2 }}>
+            <Box>
+              <Typography variant="h4" sx={{ fontWeight: 700, color: '#0f172a', mb: 1 }}>
+                Fact Check & Version Comparison
+              </Typography>
+              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap" useFlexGap>
+                <Chip
+                  label={`Page: ${pageData?.page_info?.display_name || 'Untitled Page'}`}
+                  variant="outlined"
+                  size="small"
+                />
+                <Typography variant="body2" color="text.secondary">
+                  {pageData?.page_info?.url}
+                </Typography>
+              </Stack>
+            </Box>
+            <Box sx={{ textAlign: 'right' }}>
+              <Typography variant="caption" color="text.secondary">Available Versions</Typography>
+              <Typography variant="h3" sx={{ fontWeight: 700, color: '#0f172a' }}>
+                {pageData?.versions.length || 0}
+              </Typography>
+            </Box>
+          </Box>
+        </Paper>
 
         {/* Tabs */}
-        <div className="mb-6">
-          <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
-            <button
-              onClick={() => setActiveTab('factcheck')}
-              className={`px-6 py-2.5 text-sm font-medium rounded-md transition-all ${
-                activeTab === 'factcheck'
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Fact Check
-            </button>
-            <button
-              onClick={() => setActiveTab('compare')}
-              className={`px-6 py-2.5 text-sm font-medium rounded-md transition-all ${
-                activeTab === 'compare'
-                  ? 'bg-white text-gray-900 shadow-sm border border-gray-200'
-                  : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              Version Comparison
-            </button>
-          </div>
-        </div>
+        <Paper
+          elevation={0}
+          sx={{
+            borderRadius: 3,
+            overflow: 'hidden',
+            mb: 4,
+            border: '1px solid #e2e8f0'
+          }}
+        >
+          <Tabs
+            value={activeTab}
+            onChange={(_, v) => setActiveTab(v)}
+            sx={{
+              bgcolor: 'white',
+              '& .MuiTab-root': { textTransform: 'none', fontWeight: 500, py: 2 }
+            }}
+          >
+            <Tab icon={<FactCheckIcon />} iconPosition="start" label="Fact Check" />
+            <Tab icon={<CompareIcon />} iconPosition="start" label="Version Comparison" />
+          </Tabs>
+        </Paper>
 
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Main Content with Flexbox instead of Grid */}
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, gap: 4 }}>
           {/* Sidebar - Version Selection */}
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg border border-gray-200 p-5 sticky top-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-semibold text-gray-900">Available Versions</h3>
-                <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-sm font-medium">
-                  {pageData?.versions.length || 0}
-                </span>
-              </div>
-              
-              <div className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
+          <Box sx={{ width: { xs: '100%', lg: '280px' }, flexShrink: 0 }}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 3,
+                borderRadius: 3,
+                border: '1px solid #e2e8f0',
+                position: 'sticky',
+                top: 24,
+                bgcolor: 'white'
+              }}
+            >
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>Available Versions</Typography>
+                <Chip label={pageData?.versions.length || 0} size="small" color="primary" />
+              </Box>
+
+              <Box sx={{ maxHeight: 500, overflowY: 'auto', pr: 1 }}>
                 {pageData?.versions.map((version: PageVersionInfo, index: number) => {
                   const versionId = getVersionDisplayId(version);
-                  const isSelectedFactCheck = activeTab === 'factcheck' && selectedVersion === versionId;
-                  const isSelectedCompare = activeTab === 'compare' && (oldVersion === versionId || newVersion === versionId);
-                  
+                  const isSelectedFactCheck = activeTab === 0 && selectedVersion === versionId;
+                  const isSelectedCompare = activeTab === 1 && (oldVersion === versionId || newVersion === versionId);
+
                   return (
-                    <div
+                    <Card
                       key={versionId}
-                      className={`p-4 border rounded-lg cursor-pointer transition-colors ${
-                        isSelectedFactCheck || isSelectedCompare
-                          ? 'border-blue-500 bg-blue-50' 
-                          : 'border-gray-200 hover:bg-gray-50'
-                      }`}
+                      variant="outlined"
+                      sx={{
+                        mb: 2,
+                        cursor: activeTab === 0 ? 'pointer' : 'default',
+                        transition: 'all 0.2s',
+                        bgcolor: (isSelectedFactCheck || isSelectedCompare) ? alpha(theme.palette.primary.main, 0.05) : 'white',
+                        borderColor: (isSelectedFactCheck || isSelectedCompare) ? theme.palette.primary.main : '#e2e8f0',
+                        '&:hover': activeTab === 0 ? { borderColor: theme.palette.primary.main, bgcolor: alpha(theme.palette.primary.main, 0.02) } : {}
+                      }}
                       onClick={() => {
-                        if (activeTab === 'factcheck') {
+                        if (activeTab === 0) {
                           setSelectedVersion(versionId);
                         }
                       }}
                     >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center space-x-2">
-                          <div className={`w-2 h-2 rounded-full ${
-                            index === 0 ? 'bg-green-500' : 'bg-blue-500'
-                          }`}></div>
-                          <div className="text-sm font-medium text-gray-900">
-                            {formatDate(version.timestamp || version.captured_at)}
-                          </div>
-                        </div>
-                        {index === 0 && (
-                          <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full font-medium">
-                            Latest
-                          </span>
-                        )}
-                      </div>
-                      
-                      <div className="text-xs text-gray-500 mb-2">
-                        {version.word_count || 0} words • {version.content_length || 0} chars
-                      </div>
-                      
-                      <div className="text-sm text-gray-600 line-clamp-2">
-                        {version.content_preview}
-                      </div>
-                    </div>
+                      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <Box
+                              sx={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: '50%',
+                                bgcolor: index === 0 ? '#22c55e' : '#3b82f6'
+                              }}
+                            />
+                            <Typography variant="body2" fontWeight={500}>
+                              {formatDate(version.timestamp || version.captured_at)}
+                            </Typography>
+                          </Box>
+                          {index === 0 && (
+                            <Chip label="Latest" size="small" color="success" sx={{ height: 20, fontSize: '0.625rem' }} />
+                          )}
+                        </Box>
+                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+                          {version.word_count || 0} words • {version.content_length || 0} chars
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.4 }}>
+                          {version.content_preview}
+                        </Typography>
+                      </CardContent>
+                    </Card>
                   );
                 })}
-              </div>
-            </div>
-          </div>
+              </Box>
+            </Paper>
+          </Box>
 
-          {/* Main Content */}
-          <div className="lg:col-span-3">
-            {activeTab === 'factcheck' ? (
-              <div className="bg-white rounded-lg border border-gray-200">
-                <div className="border-b border-gray-200 px-6 py-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-3 sm:space-y-0">
-                    <h2 className="text-lg font-semibold text-gray-900">Fact Check Analysis</h2>
-                    <button
+          {/* Main Content Area */}
+          <Box sx={{ flex: 1 }}>
+            {activeTab === 0 ? (
+              <Paper elevation={0} sx={{ borderRadius: 3, border: '1px solid #e2e8f0', overflow: 'hidden', bgcolor: 'white' }}>
+                <Box sx={{ borderBottom: '1px solid #e2e8f0', p: 3 }}>
+                  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>Fact Check Analysis</Typography>
+                    <Button
+                      variant="contained"
                       onClick={handleFactCheck}
                       disabled={loading || !selectedVersion}
-                      className="bg-blue-600 text-white px-5 py-2.5 text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors flex items-center space-x-2"
+                      startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <FactCheckIcon />}
+                      sx={{ textTransform: 'none', borderRadius: 2 }}
                     >
-                      {loading ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          <span>Checking...</span>
-                        </>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span>Run Fact Check</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                      {loading ? 'Checking...' : 'Run Fact Check'}
+                    </Button>
+                  </Box>
+                </Box>
 
-                <div className="p-6 fact-check-content">
+                <Box sx={{ p: 3 }}>
                   {factCheckResult ? (
-                    <div>
-                      {/* Stats Cards */}
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-green-600 mb-1">
-                            {factCheckResult.verified_claims}
-                          </div>
-                          <div className="text-sm font-medium text-green-800">Verified</div>
-                          <div className="text-xs text-green-600 mt-1">
-                            {factCheckResult.total_claims > 0 ? 
-                              ((factCheckResult.verified_claims / factCheckResult.total_claims) * 100).toFixed(1) : 0}%
-                          </div>
-                        </div>
-                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-red-600 mb-1">
-                            {factCheckResult.unverified_claims}
-                          </div>
-                          <div className="text-sm font-medium text-red-800">Unverified</div>
-                          <div className="text-xs text-red-600 mt-1">
-                            {factCheckResult.total_claims > 0 ? 
-                              ((factCheckResult.unverified_claims / factCheckResult.total_claims) * 100).toFixed(1) : 0}%
-                          </div>
-                        </div>
-                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-yellow-600 mb-1">
-                            {factCheckResult.inconclusive_claims}
-                          </div>
-                          <div className="text-sm font-medium text-yellow-800">Inconclusive</div>
-                          <div className="text-xs text-yellow-600 mt-1">
-                            {factCheckResult.total_claims > 0 ? 
-                              ((factCheckResult.inconclusive_claims / factCheckResult.total_claims) * 100).toFixed(1) : 0}%
-                          </div>
-                        </div>
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
-                          <div className="text-2xl font-bold text-blue-600 mb-1">
-                            {factCheckResult.total_claims}
-                          </div>
-                          <div className="text-sm font-medium text-blue-800">Total Claims</div>
-                          <div className="text-xs text-blue-600 mt-1">100%</div>
-                        </div>
-                      </div>
+                    <Box>
+                      {/* Stats Cards - Using Flexbox */}
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>
+                        <Box sx={{ flex: '1 1 150px', minWidth: 120 }}>
+                          <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                            <Typography variant="h4" sx={{ color: '#22c55e', fontWeight: 700 }}>
+                              {factCheckResult.verified_claims}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">Verified</Typography>
+                          </Paper>
+                        </Box>
+                        <Box sx={{ flex: '1 1 150px', minWidth: 120 }}>
+                          <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fef2f2', border: '1px solid #fecaca' }}>
+                            <Typography variant="h4" sx={{ color: '#ef4444', fontWeight: 700 }}>
+                              {factCheckResult.unverified_claims}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">Unverified</Typography>
+                          </Paper>
+                        </Box>
+                        <Box sx={{ flex: '1 1 150px', minWidth: 120 }}>
+                          <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#fefce8', border: '1px solid #fef08a' }}>
+                            <Typography variant="h4" sx={{ color: '#eab308', fontWeight: 700 }}>
+                              {factCheckResult.inconclusive_claims}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">Inconclusive</Typography>
+                          </Paper>
+                        </Box>
+                        <Box sx={{ flex: '1 1 150px', minWidth: 120 }}>
+                          <Paper sx={{ p: 2, textAlign: 'center', bgcolor: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                            <Typography variant="h4" sx={{ color: '#3b82f6', fontWeight: 700 }}>
+                              {factCheckResult.total_claims}
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">Total Claims</Typography>
+                          </Paper>
+                        </Box>
+                      </Box>
 
-                      {/* Results with image constraints */}
-                      <div className="space-y-4">
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                         {factCheckResult.results.map((result, index) => (
-                          <div key={index} className="fact-check-result-item">
-                            <FactCheckResult result={result} />
-                          </div>
+                          <FactCheckResult key={index} result={result} />
                         ))}
-                      </div>
-                    </div>
+                      </Box>
+                    </Box>
                   ) : (
-                    <div className="text-center py-12">
-                      <div className="w-16 h-16 mx-auto mb-4 text-gray-300">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      </div>
-                      <h3 className="text-base font-medium text-gray-900 mb-2">No Fact Check Results</h3>
-                      <p className="text-sm text-gray-500 max-w-sm mx-auto">
+                    <Box sx={{ textAlign: 'center', py: 8 }}>
+                      <AutoAwesomeIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+                      <Typography variant="h6" sx={{ color: '#475569', mb: 1 }}>No Fact Check Results</Typography>
+                      <Typography variant="body2" color="text.secondary">
                         Select a version from the sidebar and click "Run Fact Check" to analyze the content.
-                      </p>
-                    </div>
+                      </Typography>
+                    </Box>
                   )}
-                </div>
-              </div>
+                </Box>
+              </Paper>
             ) : (
-              <div className="bg-white rounded-lg border border-gray-200">
-                <div className="border-b border-gray-200 px-6 py-4">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-                    <h2 className="text-lg font-semibold text-gray-900">Version Comparison</h2>
-                    <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4">
-                      <div className="flex space-x-3">
-                        <select
+              <Paper elevation={0} sx={{ borderRadius: 3, border: '1px solid #e2e8f0', overflow: 'hidden', bgcolor: 'white' }}>
+                <Box sx={{ borderBottom: '1px solid #e2e8f0', p: 3 }}>
+                  <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { lg: 'center' }, gap: 2 }}>
+                    <Typography variant="h6" sx={{ fontWeight: 600 }}>Version Comparison</Typography>
+                    <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                      <FormControl size="small" sx={{ minWidth: 150 }}>
+                        <InputLabel>Old Version</InputLabel>
+                        <Select
                           value={oldVersion}
                           onChange={(e) => setOldVersion(e.target.value)}
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          label="Old Version"
                         >
-                          <option value="">Select Old Version</option>
+                          <MenuItem value="">Select Old Version</MenuItem>
                           {pageData?.versions.map((version) => (
-                            <option key={getVersionDisplayId(version)} value={getVersionDisplayId(version)}>
+                            <MenuItem key={getVersionDisplayId(version)} value={getVersionDisplayId(version)}>
                               {formatDate(version.timestamp || version.captured_at)}
-                            </option>
+                            </MenuItem>
                           ))}
-                        </select>
-                        <select
+                        </Select>
+                      </FormControl>
+                      <FormControl size="small" sx={{ minWidth: 150 }}>
+                        <InputLabel>New Version</InputLabel>
+                        <Select
                           value={newVersion}
                           onChange={(e) => setNewVersion(e.target.value)}
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          label="New Version"
                         >
-                          <option value="">Select New Version</option>
+                          <MenuItem value="">Select New Version</MenuItem>
                           {pageData?.versions.map((version) => (
-                            <option key={getVersionDisplayId(version)} value={getVersionDisplayId(version)}>
+                            <MenuItem key={getVersionDisplayId(version)} value={getVersionDisplayId(version)}>
                               {formatDate(version.timestamp || version.captured_at)}
-                            </option>
+                            </MenuItem>
                           ))}
-                        </select>
-                      </div>
-                      <button
+                        </Select>
+                      </FormControl>
+                      <Button
+                        variant="contained"
+                        color="success"
                         onClick={handleCompare}
                         disabled={loading || !oldVersion || !newVersion}
-                        className="bg-green-600 text-white px-5 py-2.5 text-sm font-medium rounded-lg hover:bg-green-700 disabled:bg-gray-400 transition-colors flex items-center space-x-2"
+                        startIcon={loading ? <CircularProgress size={16} color="inherit" /> : <CompareIcon />}
+                        sx={{ textTransform: 'none', borderRadius: 2 }}
                       >
-                        {loading ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                            <span>Comparing...</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                            </svg>
-                            <span>Compare Versions</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                        {loading ? 'Comparing...' : 'Compare Versions'}
+                      </Button>
+                    </Box>
+                  </Box>
+                </Box>
 
-                <div className="p-6 diff-viewer-content">
+                <Box sx={{ p: 3 }}>
                   {diffResult ? (
-                    <div>
-                      {/* Enhanced Comparison Header */}
-                      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <div className="space-y-2 mb-4 lg:mb-0">
-                          <div className="flex items-center space-x-4">
-                            <div className="bg-red-50 text-red-800 px-3 py-1 rounded text-sm font-medium">
-                              <strong>Old Version:</strong> {formatDate(diffResult.old_timestamp)}
-                            </div>
-                            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                            </svg>
-                            <div className="bg-green-50 text-green-800 px-3 py-1 rounded text-sm font-medium">
-                              <strong>New Version:</strong> {formatDate(diffResult.new_timestamp)}
-                            </div>
-                          </div>
-                          
-                          {/* Show change metrics if available */}
-                          {diffResult.change_metrics && (
-                            <div className="flex flex-wrap gap-3 mt-2">
-                              <div className="flex items-center space-x-1">
-                                <span className="text-xs text-gray-600">Words Added:</span>
-                                <span className="text-sm font-medium text-green-600">
-                                  +{diffResult.change_metrics.words_added || 0}
-                                </span>
-                              </div>
-                              <div className="flex items-center space-x-1">
-                                <span className="text-xs text-gray-600">Words Removed:</span>
-                                <span className="text-sm font-medium text-red-600">
-                                  -{diffResult.change_metrics.words_removed || 0}
-                                </span>
-                              </div>
-                              {diffResult.change_metrics.similarity_score && (
-                                <div className="flex items-center space-x-1">
-                                  <span className="text-xs text-gray-600">Similarity:</span>
-                                  <span className="text-sm font-medium text-blue-600">
-                                    {diffResult.change_metrics.similarity_score.toFixed(1)}%
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="bg-white border border-gray-300 px-3 py-2 rounded shadow-sm">
-                          <div className="text-base font-semibold text-gray-900">
-                            {diffResult.total_changes} Change{diffResult.total_changes !== 1 ? 's' : ''}
-                          </div>
-                          {diffResult.change_metrics && (
-                            <div className="text-xs text-gray-500 text-center mt-1">
-                              {diffResult.has_changes ? 'Changes detected' : 'No changes'}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      
-                      {/* Diff Viewer with image constraints */}
-                      <div className="diff-viewer-wrapper">
-                        <ContentDiffViewer diffData={diffResult} />
-                      </div>
-                    </div>
+                    <Box>
+                      {/* AI Summary Section */}
+                      {diffResult.ai_summary && (
+                        <Box sx={{ mb: 4, mt: 2 }}>
+                          <AISummaryCard
+                            summary={diffResult.ai_summary}
+                            onRegenerate={() => handleCompare()}
+                            showRegenerateButton={true}
+                          />
+                        </Box>
+                      )}
+
+                      {/* Comparison Header */}
+                      <Paper
+                        sx={{
+                          p: 3,
+                          mb: 4,
+                          bgcolor: '#f8fafc',
+                          borderRadius: 2,
+                          border: '1px solid #e2e8f0'
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', lg: 'row' }, justifyContent: 'space-between', alignItems: { lg: 'center' }, gap: 2 }}>
+                          <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+                              <Chip icon={<HistoryIcon />} label={`Old: ${formatDate(diffResult.old_timestamp)}`} size="small" color="error" variant="outlined" />
+                              <CompareIcon sx={{ color: '#94a3b8' }} />
+                              <Chip icon={<HistoryIcon />} label={`New: ${formatDate(diffResult.new_timestamp)}`} size="small" color="success" variant="outlined" />
+                            </Box>
+                            {diffResult.change_metrics && (
+                              <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                                <Chip icon={<TrendingUpIcon />} label={`+${diffResult.change_metrics.words_added || 0} words`} size="small" />
+                                <Chip icon={<TrendingDownIcon />} label={`-${diffResult.change_metrics.words_removed || 0} words`} size="small" />
+                                {diffResult.change_metrics.similarity_score && (
+                                  <Chip icon={<TrendingFlatIcon />} label={`${diffResult.change_metrics.similarity_score.toFixed(1)}% similar`} size="small" />
+                                )}
+                              </Box>
+                            )}
+                          </Box>
+                          <Chip
+                            label={`${diffResult.total_changes} Change${diffResult.total_changes !== 1 ? 's' : ''}`}
+                            sx={{ bgcolor: 'white', fontWeight: 600, fontSize: '1rem', p: 2 }}
+                          />
+                        </Box>
+                      </Paper>
+
+                      {/* Diff Viewer */}
+                      <ContentDiffViewer diffData={diffResult} />
+                    </Box>
                   ) : (
-                    <div className="text-center py-12">
-                      <div className="w-16 h-16 mx-auto mb-4 text-gray-300">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3" />
-                        </svg>
-                      </div>
-                      <h3 className="text-base font-medium text-gray-900 mb-2">No Comparison Results</h3>
-                      <p className="text-sm text-gray-500 max-w-sm mx-auto">
+                    <Box sx={{ textAlign: 'center', py: 8 }}>
+                      <CompareIcon sx={{ fontSize: 64, color: '#cbd5e1', mb: 2 }} />
+                      <Typography variant="h6" sx={{ color: '#475569', mb: 1 }}>No Comparison Results</Typography>
+                      <Typography variant="body2" color="text.secondary">
                         Select two versions from the dropdowns and click "Compare Versions" to see differences.
-                      </p>
-                    </div>
+                      </Typography>
+                    </Box>
                   )}
-                </div>
-              </div>
+                </Box>
+              </Paper>
             )}
-          </div>
-        </div>
-      </div>
-    </div>
+          </Box>
+        </Box>
+      </Container>
+    </Box>
   );
 };
 

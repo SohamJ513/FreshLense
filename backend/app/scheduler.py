@@ -706,12 +706,14 @@ class MonitoringScheduler:
                     "prune_strategy": "significant_only"
                 })
                 
-                # ✅ USE SMART VERSIONING: Only save if significant
-                new_version_id = self.versioning_service.save_version_if_significant(
+                # ✅ FIXED: USE SMART VERSIONING with AWAIT
+                new_version_id = await self.versioning_service.save_version_if_significant(
                     page_id=page_id,
                     new_content=current_content,
                     html_content=None,  # You can pass HTML if you store it
-                    config=page_config
+                    url=url,
+                    user_id=str(page.get("user_id", "")),
+                    generate_ai_summary=True  # Enable AI summaries
                 )
                 
                 # Update last_checked timestamp

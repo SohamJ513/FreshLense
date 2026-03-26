@@ -1,3 +1,4 @@
+# backend/app/schemas/diff.py
 from pydantic import BaseModel
 from typing import List, Optional, Tuple, Dict, Any
 from datetime import datetime
@@ -50,6 +51,9 @@ class DiffResponse(BaseModel):
     has_changes: bool = True
     change_percentage: float = 0.0
     similarity_score: float = 0.0
+    
+    # ✅ ADDED: AI Summary field
+    ai_summary: Optional[Dict[str, Any]] = None  # AI-generated summary of changes
 
 class VersionComparison(BaseModel):
     """Model for comparing two versions"""
@@ -86,6 +90,9 @@ class VersionInfo(BaseModel):
     timestamp: Optional[datetime] = None
     word_count: Optional[int] = None
     content_length: Optional[int] = None
+    
+    # ✅ ADDED: AI summary indicator
+    has_ai_summary: Optional[bool] = False
     
     class Config:
         json_encoders = {
@@ -133,6 +140,10 @@ class VersionDetailResponse(BaseModel):
     page_title: str
     page_url: str
     metadata: Optional[Dict[str, Any]] = None
+    
+    # ✅ ADDED: AI summary for version
+    has_ai_summary: Optional[bool] = False
+    ai_summary: Optional[Dict[str, Any]] = None
     
     class Config:
         json_encoders = {
