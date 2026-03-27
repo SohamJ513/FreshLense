@@ -16,7 +16,7 @@ interface AuthContextType {
   token: string | null;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
   loginWithMFA: (email: string, mfaCode: string) => Promise<{ success: boolean; error?: any }>;
-  register: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
+  register: (email: string, password: string) => Promise<{ success: boolean; message?: string; redirectToLogin?: boolean; error?: any }>;
   logout: () => void;
   loading: boolean;
   isAuthenticated: boolean;
@@ -324,13 +324,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // ✅ UPDATED: Registration - no auto-login, redirect to login
   const register = async (email: string, password: string) => {
     try {
       console.log('📝 [Auth] Registration for:', email);
       
       const response = await authAPI.register({ email, password });
       
-      // Check if MFA is required (for new registration)
+      console.log('📝 [Auth] Registration response:', response.data);
+      
+      // Check if MFA is required (for users who enable MFA during registration)
       if (isMFAResponse(response.data)) {
         console.log('🔐 [Auth] Registration requires MFA');
         
@@ -349,14 +352,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
       
-      // If registration returns token directly (unlikely)
-      if (isLoginResponse(response.data)) {
-        storeAuthData(response.data.access_token, email);
-        return { success: true };
+      // ✅ NEW: Registration successful - return success with message, DO NOT auto-login
+      if (response.data.message) {
+        console.log('✅ [Auth] Registration successful, please login');
+        return { 
+          success: true, 
+          message: response.data.message || "Registration successful! Please login to continue.",
+          redirectToLogin: true
+        };
       }
       
-      // Try to auto-login after registration
-      return await login(email, password);
+      // ✅ Handle token response (if backend returns token - fallback)
+      if (isLoginResponse(response.data)) {
+        console.log('⚠️ [Auth] Registration returned token (auto-login) - redirecting to login instead');
+        // Clear any potential token
+        clearAuthState();
+        return { 
+          success: true, 
+          message: "Registration successful! Please login to continue.",
+          redirectToLogin: true
+        };
+      }
+      
+      // Default success response
+      return { 
+        success: true, 
+        message: "Registration successful! Please login to continue.",
+        redirectToLogin: true
+      };
+      
     } catch (error: any) {
       console.error('❌ [Auth] Registration error:', error);
       return { 

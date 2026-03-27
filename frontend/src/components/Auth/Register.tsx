@@ -12,8 +12,9 @@ import {
   useTheme,
   alpha,
   Divider,
+  Snackbar,
 } from '@mui/material';
-import { Link as RouterLink } from 'react-router-dom';
+import { Link as RouterLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { PersonAdd } from '@mui/icons-material';
 
@@ -22,9 +23,12 @@ const Register: React.FC = () => {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
   
   const { register } = useAuth();
+  const navigate = useNavigate();
   const theme = useTheme();
 
   // Helper function to extract error message from API response
@@ -51,6 +55,7 @@ const Register: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
 
     // Basic validation
     if (password !== confirmPassword) {
@@ -63,19 +68,60 @@ const Register: React.FC = () => {
       return;
     }
 
+    if (!email.includes('@')) {
+      setError('Please enter a valid email address');
+      return;
+    }
+
     setLoading(true);
 
     const result = await register(email, password);
     
-    if (!result.success) {
+    if (result.success) {
+      // ✅ Show success message
+      const message = result.message || "Registration successful! Please login to continue.";
+      setSuccessMessage(message);
+      setSnackbarOpen(true);
+      
+      // ✅ Redirect to login page after 2 seconds
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+    } else if (result.error?.requires_mfa) {
+      // If MFA is required, redirect to MFA verification
+      navigate('/verify-mfa', { state: { email: result.error.email } });
+    } else {
       setError(getErrorMessage(result.error));
     }
     
     setLoading(false);
   };
 
+  const handleSnackbarClose = () => {
+    setSnackbarOpen(false);
+  };
+
   return (
     <Container maxWidth="sm">
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={2000}
+        onClose={handleSnackbarClose}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert 
+          onClose={handleSnackbarClose} 
+          severity="success" 
+          sx={{ 
+            width: '100%',
+            borderRadius: 2,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+          }}
+        >
+          {successMessage}
+        </Alert>
+      </Snackbar>
+
       <Box
         sx={{
           minHeight: '100vh',
@@ -153,6 +199,7 @@ const Register: React.FC = () => {
                   borderRadius: 2,
                   border: `1px solid ${theme.palette.error.light}`,
                 }}
+                onClose={() => setError('')}
               >
                 {error}
               </Alert>
