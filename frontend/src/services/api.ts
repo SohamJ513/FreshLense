@@ -208,6 +208,7 @@ api.interceptors.response.use(
 
 // ---------------- Types ----------------
 export interface User {
+  message: string;
   id: string;
   email: string;
   created_at: string;
