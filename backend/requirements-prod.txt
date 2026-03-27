@@ -10,7 +10,7 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.6
 
 # HTTP & Parsing
-httpx==0.28.1
+httpx==0.25.0  # ✅ FIXED: Downgraded for groq compatibility (was 0.28.1)
 beautifulsoup4==4.12.2
 requests==2.31.0
 
