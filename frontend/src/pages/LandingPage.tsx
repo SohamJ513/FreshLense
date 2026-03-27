@@ -239,12 +239,12 @@ const LandingPage: React.FC = () => {
           >
             <Slide in={isVisible} direction="right" timeout={800}>
               <Box sx={{ flex: 1 }}>
-                {/* ✅ UPDATED: Smaller font size for hero title */}
+                {/* ✅ UPDATED: Balanced font size for hero title */}
                 <Typography
                   variant="h1"
                   sx={{
                     fontWeight: 800,
-                    fontSize: { xs: '2.5rem', md: '3rem', lg: '3.5rem' },
+                    fontSize: { xs: '2.8rem', md: '3.5rem', lg: '4rem' },
                     lineHeight: 1.2,
                     mb: 2,
                     background: 'linear-gradient(45deg, #ffffff 30%, #e0e0e0 90%)',
