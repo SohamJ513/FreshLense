@@ -160,7 +160,7 @@ def get_user_by_id(user_id):
 
 
 def create_user(user_data: dict):
-    """Create a new user with hashed password and MFA enabled by default"""
+    """Create a new user with hashed password and MFA DISABLED by default"""
     if db is None:
         return None
     
@@ -177,11 +177,12 @@ def create_user(user_data: dict):
         "is_deleted": False,
         "deleted_at": None,
         "deleted_by": None,
-        "mfa_enabled": True,
-        "mfa_email": user_data.get('email'),
+        # ✅ CHANGED: MFA disabled by default
+        "mfa_enabled": user_data.get('mfa_enabled', False),
+        "mfa_email": user_data.get('mfa_email', user_data.get('email')),
         "mfa_code": None,
         "mfa_code_expires": None,
-        "mfa_setup_completed": True,
+        "mfa_setup_completed": user_data.get('mfa_setup_completed', False),
         "updated_at": datetime.utcnow()
     }
     
@@ -367,7 +368,7 @@ def verify_user_mfa_code(user_id, input_code: str):
         if not user:
             return False, "User not found or deleted"
         
-        if not user.get("mfa_enabled", True):
+        if not user.get("mfa_enabled", False):  # ✅ Changed default to False
             return False, "MFA not enabled for this account"
         
         stored_code = user.get("mfa_code")

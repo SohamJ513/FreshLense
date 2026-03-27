@@ -130,12 +130,13 @@ async def validate_token(token: Dict[str, str]):
         }
 
 # -------------------------------
-# Registration Endpoint - UPDATED
+# Registration Endpoint - UPDATED (MFA DISABLED BY DEFAULT)
 # -------------------------------
-@router.post("/register", response_model=MFALoginResponse)
+@router.post("/register")
 async def register(user_data: UserCreate):
     """
-    Register a new user with MFA enabled by default.
+    Register a new user with MFA disabled by default.
+    Users can enable MFA later through settings.
     """
     # Check if user already exists
     existing_user = get_user_by_email(user_data.email)
@@ -146,13 +147,13 @@ async def register(user_data: UserCreate):
             detail="Email already registered"
         )
     
-    # ✅ Create user WITH MFA ENABLED BY DEFAULT
+    # ✅ Create user WITH MFA DISABLED BY DEFAULT
     user = create_user({
         "email": user_data.email,
         "password": user_data.password,
-        "mfa_enabled": True,           # ✅ Enable MFA by default
-        "mfa_email": user_data.email,  # ✅ Use same email for MFA
-        "mfa_setup_completed": True    # ✅ Mark as setup completed
+        "mfa_enabled": False,           # ✅ MFA disabled by default
+        "mfa_email": user_data.email,   # Keep email for future use
+        "mfa_setup_completed": False    # ✅ Not set up
     })
     
     if not user:
@@ -162,25 +163,28 @@ async def register(user_data: UserCreate):
             detail="Failed to create user"
         )
     
-    logger.info(f"New user registered: {user['email']}")  # Keep as INFO
+    logger.info(f"New user registered: {user['email']}")
     
-    # Send MFA code for setup
-    await send_mfa_code_to_user(user)
+    # ✅ Return token directly (NO MFA required for registration)
+    access_token = create_access_token(data={"sub": user["email"]})
+    token_info = get_token_expiry_info(access_token)
+    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")
     
-    return MFALoginResponse(
-        requires_mfa=True,
-        email=user["email"],
-        message="Registration successful! MFA code sent to your email for account setup."
-    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "email": user["email"],
+        "message": "Registration successful!"
+    }
 
 # -------------------------------
-# Login with MFA Support - UPDATED WITH CONSISTENT RESPONSE
+# Login with MFA Support - UPDATED
 # -------------------------------
 @router.post("/login")
 async def login(user_credentials: UserLogin):
     """
     User login with MFA support.
-    Returns MFA requirement if enabled (default), or tokens if explicitly disabled.
+    Returns MFA requirement if enabled, otherwise returns token.
     """
     # Get user from database
     user = get_user_by_email(user_credentials.email)
@@ -201,26 +205,26 @@ async def login(user_credentials: UserLogin):
             detail="Invalid credentials"
         )
     
-    # ✅ Check if MFA is enabled for this user (default is True)
-    if user.get("mfa_enabled", True):  # Default to True if not set
-        logger.debug(f"MFA required for user: {user['email']}")  # Changed to debug
+    # ✅ Check if MFA is enabled for this user (default is False now)
+    if user.get("mfa_enabled", False):
+        logger.debug(f"MFA required for user: {user['email']}")
         
         # Send MFA code automatically
         await send_mfa_code_to_user(user)
         
-        # ✅ RETURN CONSISTENT STRUCTURE
-        return MFALoginResponse(
-            requires_mfa=True,
-            email=user["email"],
-            message="MFA code sent to your email"
-        )
+        # ✅ RETURN MFA REQUIRED RESPONSE
+        return {
+            "requires_mfa": True,
+            "email": user["email"],
+            "message": "MFA code sent to your email"
+        }
     
-    # If MFA is explicitly disabled, return tokens directly
+    # If MFA is disabled, return token directly
     access_token = create_access_token(data={"sub": user["email"]})
     
     # ✅ DEBUG: Log token creation
     token_info = get_token_expiry_info(access_token)
-    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")  # Changed to debug
+    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")
     
     return {
         "access_token": access_token,
@@ -252,7 +256,7 @@ async def send_mfa_code(request: Dict[str, str]):
         return {"message": "If the email exists, a verification code has been sent"}
     
     # Check if MFA is enabled
-    if not user.get("mfa_enabled", True):  # Default to True
+    if not user.get("mfa_enabled", False):
         logger.warning(f"MFA not enabled for user: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -426,7 +430,7 @@ async def reset_password(request: ResetPasswordRequest):
 @router.post("/setup-mfa")
 async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks):
     """
-    Enable MFA for user account (if not already enabled by default).
+    Enable MFA for user account.
     """
     email = request.email
     
@@ -486,7 +490,7 @@ async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks)
 @router.post("/disable-mfa")
 async def disable_mfa(request: Dict[str, str]):
     """
-    Disable MFA for user account (admin only).
+    Disable MFA for user account.
     """
     email = request.get("email")
     if not email:
@@ -503,7 +507,7 @@ async def disable_mfa(request: Dict[str, str]):
         )
     
     # Check if MFA is already disabled
-    if not user.get("mfa_enabled", True):  # Default to True
+    if not user.get("mfa_enabled", False):
         logger.warning(f"MFA disable requested but already disabled for: {email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -545,7 +549,7 @@ async def get_mfa_status(email: str):
         )
     
     return {
-        "mfa_enabled": user.get("mfa_enabled", True),  # Default to True
+        "mfa_enabled": user.get("mfa_enabled", False),  # Default to False
         "mfa_email": user.get("mfa_email"),
         "mfa_setup_completed": user.get("mfa_setup_completed", False)
     }
