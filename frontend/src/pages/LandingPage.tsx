@@ -42,8 +42,8 @@ const LandingPage: React.FC = () => {
   const features = [
     {
       icon: <VerifiedUser sx={{ fontSize: 40 }} />,
-      title: 'AI Fact Checking',
-      description: 'Advanced AI algorithms verify claims and technical information with 99.9% accuracy.',
+      title: 'Advanced Fact Checking',
+      description: 'Advanced algorithms verify claims and technical information with 85% accuracy.',
       color: theme.palette.primary.main,
     },
     {
@@ -79,7 +79,7 @@ const LandingPage: React.FC = () => {
   ];
 
   const stats = [
-    { number: '99.9%', label: 'Accuracy Rate', icon: <Star /> },
+    { number: '85%', label: 'Accuracy Rate', icon: <Star /> },
     { number: '24/7', label: 'Monitoring', icon: <Monitor /> },
     { number: '< 5s', label: 'Response Time', icon: <Speed /> },
     { number: '1000+', label: 'Websites Tracked', icon: <TrendingUp /> },
@@ -263,7 +263,7 @@ const LandingPage: React.FC = () => {
                       color: 'transparent',
                     }}
                   >
-                    Content With AI
+                    Content With Freshlense
                   </Box>
                 </Typography>
                 
