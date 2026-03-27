@@ -130,13 +130,13 @@ async def validate_token(token: Dict[str, str]):
         }
 
 # -------------------------------
-# Registration Endpoint - UPDATED (MFA DISABLED BY DEFAULT)
+# Registration Endpoint - UPDATED (No MFA, just success message)
 # -------------------------------
 @router.post("/register")
 async def register(user_data: UserCreate):
     """
-    Register a new user with MFA disabled by default.
-    Users can enable MFA later through settings.
+    Register a new user. MFA is disabled by default.
+    User will need to go through MFA during login.
     """
     # Check if user already exists
     existing_user = get_user_by_email(user_data.email)
@@ -165,26 +165,20 @@ async def register(user_data: UserCreate):
     
     logger.info(f"New user registered: {user['email']}")
     
-    # ✅ Return token directly (NO MFA required for registration)
-    access_token = create_access_token(data={"sub": user["email"]})
-    token_info = get_token_expiry_info(access_token)
-    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")
-    
+    # ✅ Return success message (NO token, NO MFA code)
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "email": user["email"],
-        "message": "Registration successful!"
+        "message": "Registration successful! Please login to continue.",
+        "email": user["email"]
     }
 
 # -------------------------------
-# Login with MFA Support - UPDATED
+# Login Endpoint - ALWAYS REQUIRES MFA
 # -------------------------------
 @router.post("/login")
 async def login(user_credentials: UserLogin):
     """
-    User login with MFA support.
-    Returns MFA requirement if enabled, otherwise returns token.
+    User login - ALWAYS requires MFA for all users.
+    MFA code will be sent to user's email.
     """
     # Get user from database
     user = get_user_by_email(user_credentials.email)
@@ -205,32 +199,17 @@ async def login(user_credentials: UserLogin):
             detail="Invalid credentials"
         )
     
-    # ✅ Check if MFA is enabled for this user (default is False now)
-    if user.get("mfa_enabled", False):
-        logger.debug(f"MFA required for user: {user['email']}")
-        
-        # Send MFA code automatically
-        await send_mfa_code_to_user(user)
-        
-        # ✅ RETURN MFA REQUIRED RESPONSE
-        return {
-            "requires_mfa": True,
-            "email": user["email"],
-            "message": "MFA code sent to your email"
-        }
+    # ✅ ALWAYS require MFA for login (no condition check)
+    logger.debug(f"MFA required for user: {user['email']}")
     
-    # If MFA is disabled, return token directly
-    access_token = create_access_token(data={"sub": user["email"]})
+    # Send MFA code automatically
+    await send_mfa_code_to_user(user)
     
-    # ✅ DEBUG: Log token creation
-    token_info = get_token_expiry_info(access_token)
-    logger.debug(f"Token created for {user['email']}: expires in {token_info.get('time_remaining_seconds', 0)/60:.1f} minutes")
-    
+    # ✅ Return MFA required response
     return {
-        "access_token": access_token,
-        "token_type": "bearer",
+        "requires_mfa": True,
         "email": user["email"],
-        "message": "Login successful"
+        "message": "MFA code sent to your email"
     }
 
 # -------------------------------
@@ -255,14 +234,7 @@ async def send_mfa_code(request: Dict[str, str]):
         logger.debug(f"MFA code requested for non-existent user: {email}")  # Changed to debug
         return {"message": "If the email exists, a verification code has been sent"}
     
-    # Check if MFA is enabled
-    if not user.get("mfa_enabled", False):
-        logger.warning(f"MFA not enabled for user: {email}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is not enabled for this account"
-        )
-    
+    # ✅ Always allow sending MFA code (no need to check if enabled)
     # Send MFA code
     await send_mfa_code_to_user(user)
     

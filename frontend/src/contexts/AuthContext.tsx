@@ -193,7 +193,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return 'An error occurred';
   };
 
-  // ✅ Updated login function with proper state management
+  // ✅ Updated login function - ALWAYS expects MFA from backend
   const login = async (email: string, password: string) => {
     try {
       // Clear previous auth state
@@ -216,9 +216,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       const responseData = response.data;
       
-      // Check if MFA is required
+      // ✅ Backend ALWAYS returns MFA required response
       if (isMFAResponse(responseData)) {
-        console.log('🔐 [Auth] MFA required detected in response');
+        console.log('🔐 [Auth] MFA required detected - storing state');
         
         // Store MFA state in localStorage for persistence
         const mfaEmailToStore = responseData.email || email;
@@ -238,9 +238,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
       
-      // Check if login was successful
+      // Fallback for any unexpected response
       if (isLoginResponse(responseData)) {
-        console.log('✅ [Auth] Login successful without MFA');
+        console.log('⚠️ [Auth] Unexpected token response (MFA should be required)');
         storeAuthData(responseData.access_token, email);
         return { success: true };
       }
@@ -333,28 +333,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       console.log('📝 [Auth] Registration response:', response.data);
       
-      // Check if MFA is required (for users who enable MFA during registration)
-      if (isMFAResponse(response.data)) {
-        console.log('🔐 [Auth] Registration requires MFA');
-        
-        const mfaEmailToStore = response.data.email || email;
-        localStorage.setItem('mfa_pending', 'true');
-        localStorage.setItem('mfa_email', mfaEmailToStore);
-        setMfaEmail(mfaEmailToStore);
-        
-        return { 
-          success: false, 
-          error: {
-            requires_mfa: true,
-            email: mfaEmailToStore,
-            message: response.data.message || 'MFA verification required for registration'
-          }
-        };
-      }
-      
-      // ✅ NEW: Registration successful - return success with message, DO NOT auto-login
+      // ✅ Registration successful - return success with message, redirect to login
       if (response.data.message) {
-        console.log('✅ [Auth] Registration successful, please login');
+        console.log('✅ [Auth] Registration successful, redirecting to login');
         return { 
           success: true, 
           message: response.data.message || "Registration successful! Please login to continue.",
@@ -362,19 +343,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
       
-      // ✅ Handle token response (if backend returns token - fallback)
-      if (isLoginResponse(response.data)) {
-        console.log('⚠️ [Auth] Registration returned token (auto-login) - redirecting to login instead');
-        // Clear any potential token
-        clearAuthState();
-        return { 
-          success: true, 
-          message: "Registration successful! Please login to continue.",
-          redirectToLogin: true
-        };
-      }
-      
-      // Default success response
+      // Fallback success response
       return { 
         success: true, 
         message: "Registration successful! Please login to continue.",

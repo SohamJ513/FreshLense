@@ -177,7 +177,7 @@ def create_user(user_data: dict):
         "is_deleted": False,
         "deleted_at": None,
         "deleted_by": None,
-        # ✅ CHANGED: MFA disabled by default
+        # ✅ MFA disabled by default - MFA will be required during login
         "mfa_enabled": user_data.get('mfa_enabled', False),
         "mfa_email": user_data.get('mfa_email', user_data.get('email')),
         "mfa_code": None,
@@ -368,8 +368,10 @@ def verify_user_mfa_code(user_id, input_code: str):
         if not user:
             return False, "User not found or deleted"
         
-        if not user.get("mfa_enabled", False):  # ✅ Changed default to False
-            return False, "MFA not enabled for this account"
+        # ✅ MFA is required for all logins (handled in auth.py)
+        # This function just validates the code
+        if not user.get("mfa_code"):
+            return False, "No MFA code found. Please request a new code."
         
         stored_code = user.get("mfa_code")
         expires_at = user.get("mfa_code_expires")
