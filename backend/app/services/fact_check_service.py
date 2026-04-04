@@ -296,7 +296,7 @@ class FactCheckService:
         """Detect mentioned technologies"""
         technologies = []
         tech_keywords = {
-            "python": ["python", "django", "flask"],
+            "python": ["python", "django", "flask", "fastapi"],
             "javascript": ["javascript", "node", "react", "vue", "angular"],
             "java": ["java", "spring"],
             "cloud": ["aws", "azure", "gcp", "docker", "kubernetes"],
@@ -510,32 +510,80 @@ class FactCheckService:
         }
     
     async def verify_performance_claim_enhanced(self, claim: str, indicators: Dict) -> Dict[str, Any]:
-        """Verify performance claims"""
-        # Check for unrealistic performance numbers
+        """Verify performance claims with realistic thresholds - FIXED FOR 100x CLAIMS"""
+        claim_lower = claim.lower()
         numbers = indicators.get("numbers", [])
         
+        # 🚨 NEW: Check for unrealistic "X times faster" claims
+        times_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:x|times)\s*(?:faster|better|performance)', claim_lower)
+        if times_match:
+            multiplier = float(times_match.group(1))
+            
+            # Realistic thresholds for framework/library comparisons
+            if multiplier > 20:
+                return {
+                    "verdict": Verdict.FALSE,
+                    "confidence": 0.90,
+                    "explanation": f"Performance claim of {multiplier}x faster is unrealistic. Real-world improvements typically range from 1.5x to 5x for similar technologies. Such claims are often based on synthetic benchmarks that don't reflect real-world usage.",
+                    "sources": ["Industry performance benchmarks", "Software engineering best practices"]
+                }
+            elif multiplier > 10:
+                return {
+                    "verdict": Verdict.FALSE,
+                    "confidence": 0.75,
+                    "explanation": f"Claim of {multiplier}x faster is highly unlikely. Most framework performance differences are under 5x in real-world scenarios.",
+                    "sources": ["Performance testing standards", "TechEmpower benchmarks"]
+                }
+        
+        # 🚨 NEW: Check for "always faster" absolute claims
+        if "always" in claim_lower and ("faster" in claim_lower or "better" in claim_lower):
+            return {
+                "verdict": Verdict.FALSE,
+                "confidence": 0.80,
+                "explanation": "Absolute performance claims ('always faster') are rarely true. Performance depends on specific use cases, configurations, and workloads.",
+                "sources": ["Performance testing principles", "Software engineering best practices"]
+            }
+        
+        # Check for unrealistic performance numbers
         for number in numbers:
             if '%' in number:
                 try:
                     percentage = float(number.replace('%', ''))
-                    if percentage > 1000:  # Unrealistic improvement
+                    if percentage > 500:
                         return {
                             "verdict": Verdict.FALSE,
                             "confidence": 0.85,
-                            "explanation": f"Performance improvement of {percentage}% seems unrealistic without specific benchmark evidence",
+                            "explanation": f"Performance improvement of {percentage}% seems unrealistic without specific benchmark evidence. Typical improvements are under 100% for framework comparisons.",
                             "sources": ["Software engineering best practices", "Performance benchmarking standards"]
+                        }
+                    elif percentage > 200:
+                        return {
+                            "verdict": Verdict.FALSE,
+                            "confidence": 0.70,
+                            "explanation": f"Performance improvement of {percentage}% is unusually high and requires specific, reproducible benchmark evidence.",
+                            "sources": ["Performance testing standards"]
                         }
                 except ValueError:
                     pass
         
         # Check for development time reduction claims
-        if "reduces" in claim.lower() and "development" in claim.lower() and "time" in claim.lower():
+        if "reduces" in claim_lower and "development" in claim_lower and "time" in claim_lower:
             return {
                 "verdict": Verdict.UNVERIFIED,
                 "confidence": 0.60,
                 "explanation": "Development time reduction claims are subjective and vary by project context. They require specific benchmark evidence for verification.",
                 "sources": []
             }
+        
+        # Check for missing benchmark context
+        if "faster" in claim_lower or "better" in claim_lower:
+            if "benchmark" not in claim_lower and "test" not in claim_lower and "measure" not in claim_lower:
+                return {
+                    "verdict": Verdict.UNVERIFIED,
+                    "confidence": 0.55,
+                    "explanation": "Performance claim lacks specific benchmark context. Performance comparisons need measurable metrics and test conditions to verify.",
+                    "sources": []
+                }
         
         return {
             "verdict": Verdict.UNVERIFIED,
