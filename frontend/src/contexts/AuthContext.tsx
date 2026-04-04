@@ -18,6 +18,7 @@ interface AuthContextType {
   loginWithMFA: (email: string, mfaCode: string) => Promise<{ success: boolean; error?: any }>;
   register: (email: string, password: string) => Promise<{ success: boolean; message?: string; redirectToLogin?: boolean; error?: any }>;
   logout: () => void;
+  logoutWithConfirmation?: () => Promise<boolean>; // Optional: if you want confirmation at context level
   loading: boolean;
   isAuthenticated: boolean;
   mfaEmail: string | null;
@@ -362,9 +363,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  // ✅ UPDATED: Logout function with optional callback for custom handling
   const logout = () => {
     console.log('👋 [Auth] Logging out');
-    clearAuthState();
+    
+    // Optional: Call backend logout endpoint to blacklist token
+    const performLogout = async () => {
+      try {
+        const currentToken = localStorage.getItem('token');
+        if (currentToken) {
+          await authAPI.logout();
+          console.log('✅ [Auth] Backend logout successful');
+        }
+      } catch (error) {
+        console.error('⚠️ [Auth] Backend logout error (non-critical):', error);
+      } finally {
+        clearAuthState();
+      }
+    };
+    
+    // Execute async logout but don't wait for it
+    performLogout();
   };
 
   const clearMFAEmail = () => {

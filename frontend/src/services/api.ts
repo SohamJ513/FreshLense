@@ -424,6 +424,28 @@ export const authAPI = {
     });
   },
 
+  // ✅ ADDED: Logout endpoint
+  logout: async () => {
+    console.log('[Auth] Logging out...');
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.log('[Auth] No token found, already logged out');
+      return { success: true };
+    }
+    
+    try {
+      const response = await api.post('/auth/logout', {}, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      console.log('[Auth] Logout successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('[Auth] Logout API error (non-critical):', error);
+      // Don't throw - we still want to clear local state
+      return { success: false };
+    }
+  },
+
   // Forgot Password endpoints
   forgotPassword: (email: string) =>
     api.post<ForgotPasswordResponse>('/auth/forgot-password', { email }),
