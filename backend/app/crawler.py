@@ -1,4 +1,4 @@
-# backend/crawler.py
+# backend/app/crawler.py
 import requests
 from bs4 import BeautifulSoup, Comment
 import time
@@ -54,7 +54,8 @@ class ContentFetcher:
                 logger.warning(f"🔌 Connection error on attempt {attempt + 1} for {url}")
             except requests.exceptions.HTTPError as e:
                 logger.warning(f"🚫 HTTP error on attempt {attempt + 1} for {url}: {e}")
-                if e.response.status_code in [404, 403, 401]:
+                # Check if response exists before accessing status_code
+                if hasattr(e, 'response') and e.response is not None and e.response.status_code in [404, 403, 401]:
                     # Don't retry for client errors
                     break
             except requests.RequestException as e:
@@ -109,12 +110,23 @@ class ContentFetcher:
             for selector in main_selectors:
                 main_content = soup.select_one(selector)
                 if main_content:
-                    text = main_content.get_text(separator='\n', strip=True)
-                    if len(text) > 100:  # Increased threshold for meaningful content
+                    # Preserve heading tags by getting text with structure
+                    text = self._get_structured_text(main_content)
+                    if len(text) > 50:
                         logger.debug(f"✅ Found content with selector '{selector}': {len(text)} characters")
                         cleaned_text = self.clean_text(text)
-                        if len(cleaned_text) > 50:
+                        if len(cleaned_text) > 30:
                             return cleaned_text
+            
+            # Try to get content from body tag as fallback
+            body_tag = soup.find('body')
+            if body_tag:
+                text = self._get_structured_text(body_tag)
+                if len(text) > 50:
+                    cleaned_text = self.clean_text(text)
+                    if len(cleaned_text) > 30:
+                        logger.debug(f"✅ Extracted from body tag: {len(cleaned_text)} characters")
+                        return cleaned_text
             
             # Fallback: Extract from meaningful paragraphs and divs
             meaningful_elements = soup.find_all(['p', 'div', 'section', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'])
@@ -122,25 +134,37 @@ class ContentFetcher:
             
             for elem in meaningful_elements:
                 # Skip if element contains mostly child elements (likely navigation)
-                if len(elem.find_all()) > len(elem.get_text().split()) // 3:
+                if len(elem.find_all()) > len(elem.get_text().split()) // 2:
                     continue
                     
                 text = elem.get_text(separator=' ', strip=True)
                 if self.is_meaningful_text(text):
-                    meaningful_text.append(text)
+                    # Preserve heading context
+                    if elem.name and elem.name.startswith('h'):
+                        meaningful_text.append(f"\n{text}\n")
+                    else:
+                        meaningful_text.append(text)
             
             if meaningful_text:
                 combined_text = '\n'.join(meaningful_text)
                 logger.debug(f"✅ Found {len(meaningful_text)} meaningful elements: {len(combined_text)} characters")
                 cleaned = self.clean_text(combined_text)
-                if len(cleaned) > 50:
+                if len(cleaned) > 30:
                     return cleaned
                 
             # Final fallback: get all text
-            all_text = soup.get_text(separator='\n', strip=True)
+            all_text = self._get_structured_text(soup)
             cleaned_text = self.clean_text(all_text)
             
-            if len(cleaned_text) > 50:
+            # Ultimate rescue fallback - if cleaned_text is empty but original has content
+            if not cleaned_text and len(all_text) > 50:
+                # Simple cleaning without aggressive filtering
+                lines = [line.strip() for line in all_text.split('\n') if len(line.strip()) > 10]
+                if lines:
+                    cleaned_text = '\n'.join(lines[:20])
+                    logger.debug(f"✅ Rescue extraction with basic cleaning: {len(cleaned_text)} characters")
+            
+            if len(cleaned_text) > 30:
                 logger.debug(f"✅ Final fallback extraction: {len(cleaned_text)} characters")
                 return cleaned_text
             else:
@@ -151,24 +175,72 @@ class ContentFetcher:
             logger.error(f"💥 Content extraction failed for {url}: {e}")
             return ""
 
+    def _get_structured_text(self, element) -> str:
+        """Extract text while preserving heading structure"""
+        if not element:
+            return ""
+        
+        parts = []
+        for child in element.children:
+            if child.name and child.name.startswith('h') and len(child.name) == 2:
+                # Heading tag - add with newlines for emphasis
+                heading_text = child.get_text(strip=True)
+                if heading_text:
+                    parts.append(f"\n{heading_text}\n")
+            elif child.name == 'p':
+                # Paragraph tag
+                para_text = child.get_text(strip=True)
+                if para_text:
+                    parts.append(para_text)
+            elif child.name == 'li':
+                # List item
+                li_text = child.get_text(strip=True)
+                if li_text:
+                    parts.append(f"• {li_text}")
+            elif child.name == 'code' or child.name == 'pre':
+                # Code block
+                code_text = child.get_text(strip=True)
+                if code_text:
+                    parts.append(f"`{code_text}`")
+            elif hasattr(child, 'children'):
+                # Recursively process nested elements
+                parts.append(self._get_structured_text(child))
+            elif hasattr(child, 'string') and child.string and child.string.strip():
+                # Direct text
+                parts.append(child.string.strip())
+        
+        return '\n'.join(parts)
+
     def is_meaningful_text(self, text: str) -> bool:
         """Check if text is meaningful (not navigation, ads, etc.) - MORE LENIENT FOR DOCS"""
-        # 🚨 CRITICAL FIX: Reduced thresholds for technical documentation
-        if len(text) < 15:  # Reduced from 30 to 15
+        # FIX: Pagination text should be filtered
+        pagination_patterns = [
+            r'^Page\s+\d+\s+of\s+\d+$',
+            r'^\d+\s+of\s+\d+$',
+            r'^Page\s+\d+$',
+            r'^Go to page\s+\d+$',
+            r'^Next$|^Previous$|^First$|^Last$',
+        ]
+        
+        for pattern in pagination_patterns:
+            if re.match(pattern, text, re.IGNORECASE):
+                logger.debug(f"🔧 Filtering pagination text: '{text}'")
+                return False
+        
+        # Thresholds for technical documentation
+        if len(text) < 8:
             return False
         
         word_count = len(text.split())
-        if word_count < 3:   # Reduced from 5 to 3 (technical docs have short factual sentences)
+        if word_count < 2:
             return False
         
         # Skip common non-content patterns
         skip_patterns = [
             r'^\s*\d+\s*$',  # Just numbers
-            r'^[A-Z\s]{10,}$',  # All caps (likely navigation) - made more strict
+            r'^[A-Z\s]{15,}$',  # All caps (likely navigation)
             r'^(Home|About|Contact|Menu|Login|Sign up|Subscribe|Search)(\s|$)',
             r'Cookie|Privacy Policy|Terms of Service|All rights reserved',
-            r'^\d+\s+of\s+\d+$',  # Pagination
-            r'^Page\s+\d+$',
             r'^©\s*\d{4}',
             r'^Back to top$',
             r'^Skip to main content$',
@@ -178,30 +250,37 @@ class ContentFetcher:
             if re.search(pattern, text, re.IGNORECASE):
                 return False
         
-        # 🚨 NEW: Explicitly allow technical content patterns
+        # Explicitly allow technical content patterns
         technical_patterns = [
-            r'\b(python|javascript|java|react|node|django|mongodb|docker|kubernetes)\b',
+            r'\b(python|javascript|java|react|node|django|mongodb|docker|kubernetes|fastapi|flask)\b',
             r'\b\d+\.\d+(\.\d+)?\b',  # Version numbers
             r'\b\d+%\b',  # Percentages
             r'\b\d+x\b',  # Multipliers
-            r'\b(faster|slower|better|performance|compatible|supports|requires)\b',
+            r'\b(faster|slower|better|performance|compatible|supports|requires|EOL|Installation|Usage)\b',
             r'\b(memory|cpu|storage|latency|throughput|index|query)\b',
+            r'\b(pip|npm|install|import|from|def|class)\b',  # Code keywords
+            r'[<>=\+\-\*/]+',  # Operators that might appear in code
         ]
         
         # If it matches technical patterns, be more lenient
         if any(re.search(pattern, text, re.IGNORECASE) for pattern in technical_patterns):
-            logger.debug(f"🔧 Allowing technical content: '{text}'")
+            logger.debug(f"🔧 Allowing technical content: '{text[:50]}...'")
             return True
         
-        return True
+        # Allow text with reasonable length that's not filtered by patterns
+        if len(text) > 20 and word_count > 2:
+            return True
+        
+        return False
 
     def clean_text(self, text: str) -> str:
         """Clean extracted text by removing noise and formatting - MORE LENIENT"""
         if not text:
             return ""
         
+        # First, split into lines and remove duplicates
         lines = []
-        seen_lines = set()  # Remove duplicates
+        seen_lines = set()
         
         for line in text.split('\n'):
             line = line.strip()
@@ -210,18 +289,38 @@ class ContentFetcher:
             if not line:
                 continue
             
-            # 🚨 CRITICAL FIX: Reduced minimum line length for technical docs
-            if len(line) < 10:  # Reduced from 20 to 10
+            # Skip duplicate lines (case-insensitive for better deduplication)
+            line_lower = line.lower()
+            if line_lower in seen_lines:
+                logger.debug(f"🔧 Removing duplicate line: '{line[:50]}...'")
                 continue
             
-            # Skip duplicate lines
-            if line in seen_lines:
-                continue
+            # Keep short lines that contain technical keywords
+            technical_keywords = ['python', 'java', 'react', 'docker', 'pip', 'npm', 'eol', 'api', 'v2', 'v3', 
+                                  'installation', 'usage', 'example', 'code', 'function', 'class']
+            is_technical = any(keyword in line.lower() for keyword in technical_keywords)
             
             # Check if line is meaningful (with new lenient rules)
-            if self.is_meaningful_text(line):
+            if self.is_meaningful_text(line) or (is_technical and len(line) >= 3):
                 lines.append(line)
-                seen_lines.add(line)
+                seen_lines.add(line_lower)
+        
+        # If no lines were kept but original text has content, try a simpler approach
+        if not lines and len(text) > 20:
+            # Simple fallback: return unique lines with basic cleaning
+            unique_lines = []
+            seen = set()
+            for line in text.split('\n'):
+                line = line.strip()
+                if line and len(line) > 5 and line.lower() not in seen:
+                    unique_lines.append(line)
+                    seen.add(line.lower())
+            
+            if unique_lines:
+                result = '\n'.join(unique_lines[:20])
+                if len(result) > 20:
+                    logger.debug(f"✅ Fallback cleaning with unique lines: {len(result)} characters")
+                    return result
         
         # Join lines and clean up extra whitespace
         result = '\n'.join(lines)
@@ -237,9 +336,11 @@ class ContentFetcher:
     def get_domain(self, url: str) -> str:
         """Extract domain from URL for rate limiting purposes"""
         try:
-            return urlparse(url).netloc
+            domain = urlparse(url).netloc
+            # Return empty string for invalid URLs instead of "unknown"
+            return domain if domain else ""
         except Exception:
-            return "unknown"
+            return ""
 
     def fetch_and_extract(self, url: str) -> Tuple[Optional[str], Optional[str]]:
         """

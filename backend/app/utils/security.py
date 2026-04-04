@@ -175,7 +175,7 @@ def is_token_valid(token: str) -> bool:
         logger.debug(f"Invalid token")
         return False
 
-# ✅ ADDED: Function to get token expiry info
+# ✅ ADDED: Function to get token expiry info - FIXED with UTC timezone
 def get_token_expiry_info(token: str) -> Dict[str, Any]:
     """Get token expiry information"""
     try:
@@ -183,14 +183,15 @@ def get_token_expiry_info(token: str) -> Dict[str, Any]:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM], options={"verify_exp": False})
         
         if 'exp' in payload:
-            expiry_time = datetime.fromtimestamp(payload['exp'])
+            # ✅ FIXED: Use utcfromtimestamp instead of fromtimestamp for UTC consistency
+            expiry_time = datetime.utcfromtimestamp(payload['exp'])
             current_time = datetime.utcnow()
             time_remaining = expiry_time - current_time
             
             return {
                 "valid": expiry_time > current_time,
                 "expires_at": expiry_time,
-                "issued_at": datetime.fromtimestamp(payload.get('iat', 0)) if payload.get('iat') else None,
+                "issued_at": datetime.utcfromtimestamp(payload.get('iat', 0)) if payload.get('iat') else None,
                 "time_remaining_seconds": max(0, time_remaining.total_seconds()),
                 "subject": payload.get('sub')
             }
