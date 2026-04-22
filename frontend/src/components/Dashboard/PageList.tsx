@@ -1,3 +1,4 @@
+// frontend/src/components/Dashboard/PageList.tsx
 import React, { useState } from "react";
 import {
   Table,
@@ -20,6 +21,9 @@ import {
   DialogActions,
   TextField,
   MenuItem,
+  alpha,
+  Zoom,
+  Fade,
 } from "@mui/material";
 import {
   Delete as DeleteIcon,
@@ -29,7 +33,10 @@ import {
   CheckCircle as CheckCircleIcon,
   Warning as WarningIcon,
   FactCheck as FactCheckIcon,
+  TrendingUp as TrendingUpIcon,
+  Link as LinkIcon,
 } from "@mui/icons-material";
+import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { TrackedPage, updatePage, PageUpdateData, UpdatedPageResponse } from "../../services/api";
 
@@ -58,6 +65,7 @@ const PageList: React.FC<PageListProps> = ({
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'Never';
@@ -88,9 +96,15 @@ const PageList: React.FC<PageListProps> = ({
         <Chip 
           label="Inactive" 
           size="small" 
-          color="default"
           icon={<WarningIcon />}
-          sx={{ height: 28, fontSize: '0.875rem' }}
+          sx={{ 
+            height: 28, 
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            bgcolor: alpha('#9e9e9e', 0.1),
+            color: '#9e9e9e',
+            '& .MuiChip-icon': { fontSize: 14, color: '#9e9e9e' }
+          }}
         />
       );
     }
@@ -99,11 +113,17 @@ const PageList: React.FC<PageListProps> = ({
       return (
         <Tooltip title={`Last change: ${formatDate(page.last_change_detected)}`}>
           <Chip 
-            label="Changed" 
+            label="Changes Detected" 
             size="small" 
-            color="success"
-            icon={<CheckCircleIcon />}
-            sx={{ height: 28, fontSize: '0.875rem' }}
+            icon={<TrendingUpIcon />}
+            sx={{ 
+              height: 28, 
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              bgcolor: alpha('#2e7d32', 0.1),
+              color: '#2e7d32',
+              '& .MuiChip-icon': { fontSize: 14, color: '#2e7d32' }
+            }}
           />
         </Tooltip>
       );
@@ -112,11 +132,17 @@ const PageList: React.FC<PageListProps> = ({
     if (page.last_checked) {
       return (
         <Chip 
-          label="Monitored" 
+          label="Active" 
           size="small" 
-          color="primary"
-          icon={<ScheduleIcon />}
-          sx={{ height: 28, fontSize: '0.875rem' }}
+          icon={<CheckCircleIcon />}
+          sx={{ 
+            height: 28, 
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            bgcolor: alpha('#1976d2', 0.1),
+            color: '#1976d2',
+            '& .MuiChip-icon': { fontSize: 14, color: '#1976d2' }
+          }}
         />
       );
     }
@@ -125,19 +151,23 @@ const PageList: React.FC<PageListProps> = ({
       <Chip 
         label="Pending" 
         size="small" 
-        color="warning"
         icon={<ScheduleIcon />}
-        sx={{ height: 28, fontSize: '0.875rem' }}
+        sx={{ 
+          height: 28, 
+          fontSize: '0.75rem',
+          fontWeight: 600,
+          bgcolor: alpha('#ed6c02', 0.1),
+          color: '#ed6c02',
+          '& .MuiChip-icon': { fontSize: 14, color: '#ed6c02' }
+        }}
       />
     );
   };
 
-  // Check if a page has versions available for fact checking
   const hasVersionsForFactCheck = (page: TrackedPage): boolean => {
     return !!page.current_version_id;
   };
 
-  // Handle edit button click
   const handleEditClick = (page: TrackedPage) => {
     setEditingPage(page);
     setEditFormData({
@@ -147,7 +177,6 @@ const PageList: React.FC<PageListProps> = ({
     setEditError(null);
   };
 
-  // Handle edit form submission
   const handleEditSubmit = async () => {
     if (!editingPage) return;
 
@@ -157,10 +186,9 @@ const PageList: React.FC<PageListProps> = ({
     try {
       const updatedPageResponse: UpdatedPageResponse = await updatePage(editingPage.id, editFormData);
       
-      // Convert UpdatedPageResponse to TrackedPage format
       const updatedPage: TrackedPage = {
         id: updatedPageResponse.id,
-        user_id: editingPage.user_id, // Preserve from original
+        user_id: editingPage.user_id,
         url: updatedPageResponse.url,
         display_name: updatedPageResponse.display_name,
         check_interval_minutes: updatedPageResponse.check_interval_hours * 60,
@@ -180,17 +208,15 @@ const PageList: React.FC<PageListProps> = ({
     }
   };
 
-  // Interval options for the select
   const intervalOptions = [
-    { value: 1, label: '1 hour' },
-    { value: 6, label: '6 hours' },
-    { value: 12, label: '12 hours' },
-    { value: 24, label: '1 day' },
-    { value: 72, label: '3 days' },
-    { value: 168, label: '1 week' },
+    { value: 1, label: '1 hour', icon: '⚡' },
+    { value: 6, label: '6 hours', icon: '🕐' },
+    { value: 12, label: '12 hours', icon: '🕛' },
+    { value: 24, label: '24 hours', icon: '📅' },
+    { value: 72, label: '3 days', icon: '📆' },
+    { value: 168, label: '1 week', icon: '🗓️' },
   ];
 
-  // Get domain for shorter display
   const getShortUrl = (url: string): string => {
     try {
       const urlObj = new URL(url);
@@ -200,7 +226,6 @@ const PageList: React.FC<PageListProps> = ({
     }
   };
 
-  // Get path for tooltip
   const getUrlPath = (url: string): string => {
     try {
       const urlObj = new URL(url);
@@ -212,14 +237,25 @@ const PageList: React.FC<PageListProps> = ({
 
   if (pages.length === 0) {
     return (
-      <Paper sx={{ p: 3, textAlign: 'center' }}>
-        <Typography variant="h6" color="text.secondary">
-          No pages being monitored
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          Add your first page to get started with monitoring!
-        </Typography>
-      </Paper>
+      <Fade in>
+        <Box sx={{ p: 6, textAlign: 'center' }}>
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Box sx={{ mb: 2 }}>
+              <ScheduleIcon sx={{ fontSize: 64, color: 'text.disabled', mb: 2 }} />
+            </Box>
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No pages being monitored
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Add your first page to get started with monitoring!
+            </Typography>
+          </motion.div>
+        </Box>
+      </Fade>
     );
   }
 
@@ -227,97 +263,122 @@ const PageList: React.FC<PageListProps> = ({
     <>
       <TableContainer 
         component={Paper} 
-        elevation={2}
+        elevation={0}
         sx={{ 
           width: '100%',
           overflowX: 'auto',
-          borderRadius: 1,
+          borderRadius: 0,
+          '& .MuiTable-root': {
+            minWidth: 900,
+          },
         }}
       >
-        <Table sx={{ 
-          width: '100%',
-          tableLayout: 'fixed',
-        }}>
+        <Table>
           <TableHead>
-            <TableRow sx={{ backgroundColor: 'grey.50' }}>
+            <TableRow sx={{ bgcolor: '#fafafa' }}>
               <TableCell 
                 sx={{ 
-                  width: '22%', 
+                  width: '18%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider'
+                  borderColor: '#e0e0e0',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 URL
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '18%', 
+                  width: '15%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider'
+                  borderColor: '#e0e0e0',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 Display Name
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '12%', 
+                  width: '14%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider',
-                  textAlign: 'center'
+                  borderColor: '#e0e0e0',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 Status
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '16%', 
+                  width: '14%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider',
-                  textAlign: 'center'
+                  borderColor: '#e0e0e0',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 Last Checked
               </TableCell>
               <TableCell 
                 sx={{ 
-                  width: '10%', 
+                  width: '9%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider',
-                  textAlign: 'center'
+                  borderColor: '#e0e0e0',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 Interval
               </TableCell>
+              {/* ↓ Actions column now takes remaining space and doesn't wrap */}
               <TableCell 
                 sx={{ 
-                  width: '22%', 
+                  width: '30%', 
                   py: 2,
                   px: 3,
-                  fontWeight: 600,
-                  fontSize: '0.9375rem',
+                  fontWeight: 700,
+                  fontSize: '0.8125rem',
+                  color: '#1976d2',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
                   borderBottom: '2px solid',
-                  borderColor: 'divider',
-                  textAlign: 'center'
+                  borderColor: '#e0e0e0',
+                  textAlign: 'center',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 Actions
@@ -325,242 +386,218 @@ const PageList: React.FC<PageListProps> = ({
             </TableRow>
           </TableHead>
           <TableBody>
-            {pages.map((page) => (
-              <TableRow 
-                key={page.id}
-                sx={{
-                  '&:hover': {
-                    backgroundColor: 'action.hover',
-                  },
-                  opacity: page.is_active ? 1 : 0.6,
-                  height: 64,
-                }}
-              >
-                {/* URL Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle'
-                  }}
+            <AnimatePresence>
+              {pages.map((page, index) => (
+                <motion.tr
+                  key={page.id}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.3, delay: index * 0.05 }}
+                  onMouseEnter={() => setHoveredRow(page.id)}
+                  onMouseLeave={() => setHoveredRow(null)}
+                  style={{ display: 'table-row' }}
                 >
-                  <Tooltip title={`${getShortUrl(page.url)}${getUrlPath(page.url)}`}>
-                    <Typography 
-                      variant="body2" 
-                      component="a"
-                      href={page.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      sx={{
-                        textDecoration: 'none',
-                        color: 'primary.main',
-                        fontSize: '0.875rem',
-                        '&:hover': {
-                          textDecoration: 'underline',
-                        },
-                        display: 'block',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        fontWeight: 500,
-                        lineHeight: '1.4'
-                      }}
-                    >
-                      {getShortUrl(page.url)}
-                    </Typography>
-                  </Tooltip>
-                </TableCell>
-
-                {/* Display Name Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle'
-                  }}
-                >
-                  <Typography 
-                    variant="body2"
-                    sx={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontWeight: 500,
-                      fontSize: '0.875rem',
-                      lineHeight: '1.4'
+                  <TableCell 
+                    sx={{ 
+                      py: 2,
+                      px: 3,
+                      verticalAlign: 'middle',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
+                      transition: 'background-color 0.2s ease',
                     }}
                   >
-                    {page.display_name || '-'}
-                  </Typography>
-                </TableCell>
+                    <Tooltip title={`${getShortUrl(page.url)}${getUrlPath(page.url)}`} placement="top">
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <LinkIcon sx={{ fontSize: 14, color: '#9e9e9e', flexShrink: 0 }} />
+                        <Typography 
+                          variant="body2" 
+                          component="a"
+                          href={page.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          sx={{
+                            textDecoration: 'none',
+                            color: '#1976d2',
+                            fontSize: '0.875rem',
+                            fontWeight: 500,
+                            '&:hover': {
+                              textDecoration: 'underline',
+                              color: '#1565c0',
+                            },
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {getShortUrl(page.url)}
+                        </Typography>
+                      </Box>
+                    </Tooltip>
+                  </TableCell>
 
-                {/* Status Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Box sx={{ 
-                    display: 'flex', 
-                    justifyContent: 'center',
-                    alignItems: 'center'
-                  }}>
-                    {getStatusChip(page)}
-                  </Box>
-                </TableCell>
-
-                {/* Last Checked Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Box sx={{ 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    height: '100%'
-                  }}>
+                  <TableCell 
+                    sx={{ 
+                      py: 2,
+                      px: 3,
+                      verticalAlign: 'middle',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
+                    }}
+                  >
                     <Typography 
                       variant="body2"
                       sx={{
-                        fontWeight: 500,
+                        fontWeight: 600,
                         fontSize: '0.875rem',
-                        lineHeight: '1.3'
+                        color: '#424242',
                       }}
                     >
-                      {formatDate(page.last_checked)}
+                      {page.display_name || '—'}
                     </Typography>
-                    {page.last_checked && (
-                      <Typography 
-                        variant="caption" 
-                        color="text.secondary"
-                        sx={{ 
-                          mt: 0.25,
-                          lineHeight: '1.2',
-                          fontSize: '0.8125rem'
-                        }}
-                      >
-                        {formatTimeAgo(page.last_checked)}
-                      </Typography>
-                    )}
-                  </Box>
-                </TableCell>
+                  </TableCell>
 
-                {/* Interval Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Typography 
-                    variant="body2" 
+                  <TableCell 
                     sx={{ 
-                      fontWeight: 500,
-                      fontSize: '0.875rem',
-                      lineHeight: '1.4'
+                      py: 2,
+                      px: 3,
+                      verticalAlign: 'middle',
+                      textAlign: 'center',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
                     }}
                   >
-                    {page.check_interval_minutes < 60
-                      ? `${page.check_interval_minutes}m`
-                      : page.check_interval_minutes < 1440
-                      ? `${Math.round(page.check_interval_minutes / 60)}h`
-                      : `${Math.round(page.check_interval_minutes / 1440)}d`
-                    }
-                  </Typography>
-                </TableCell>
-
-                {/* Actions Column */}
-                <TableCell 
-                  sx={{ 
-                    py: 1.75,
-                    px: 3,
-                    verticalAlign: 'middle',
-                    textAlign: 'center'
-                  }}
-                >
-                  <Box sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 2.5,
-                    width: '100%'
-                  }}>
-                    {/* Icon Buttons - Stacked vertically */}
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: 0.75
-                    }}>
-                      <Tooltip title="Edit page">
-                        <span>
-                          <IconButton
-                            color="primary"
-                            size="small"
-                            onClick={() => handleEditClick(page)}
-                            disabled={!page.is_active}
-                            sx={{ 
-                              width: 34,
-                              height: 34,
-                              color: 'primary.main',
-                              '&:hover': {
-                                backgroundColor: 'primary.50',
-                              }
-                            }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
-
-                      <Tooltip title="Delete page">
-                        <span>
-                          <IconButton
-                            color="error"
-                            size="small"
-                            onClick={() => {
-                              if (window.confirm(`Delete "${page.display_name || page.url}"?`)) {
-                                onPageDeleted(page.id);
-                              }
-                            }}
-                            disabled={deletingPages.has(page.id)}
-                            sx={{ 
-                              width: 34,
-                              height: 34,
-                              '&:hover': {
-                                backgroundColor: 'error.50',
-                              }
-                            }}
-                          >
-                            {deletingPages.has(page.id) ? (
-                              <CircularProgress size={16} />
-                            ) : (
-                              <DeleteIcon fontSize="small" />
-                            )}
-                          </IconButton>
-                        </span>
-                      </Tooltip>
+                    <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+                      {getStatusChip(page)}
                     </Box>
+                  </TableCell>
 
-                    {/* Text Buttons - Side by Side */}
-                    <Box sx={{ 
-                      display: 'flex', 
-                      flexDirection: 'column',
-                      gap: 0.75,
-                      width: 130
-                    }}>
-                      {/* Check Now Button */}
+                  <TableCell 
+                    sx={{ 
+                      py: 2,
+                      px: 3,
+                      verticalAlign: 'middle',
+                      textAlign: 'center',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
+                    }}
+                  >
+                    <Box>
+                      <Typography 
+                        variant="body2"
+                        sx={{
+                          fontWeight: 500,
+                          fontSize: '0.875rem',
+                          color: '#424242',
+                        }}
+                      >
+                        {formatDate(page.last_checked)}
+                      </Typography>
+                      {page.last_checked && (
+                        <Typography 
+                          variant="caption" 
+                          sx={{ 
+                            color: '#9e9e9e',
+                            fontSize: '0.75rem',
+                          }}
+                        >
+                          {formatTimeAgo(page.last_checked)}
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
+
+                  <TableCell 
+                    sx={{ 
+                      py: 2,
+                      px: 3,
+                      verticalAlign: 'middle',
+                      textAlign: 'center',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
+                    }}
+                  >
+                    <Chip
+                      label={page.check_interval_minutes < 60
+                        ? `${page.check_interval_minutes}m`
+                        : page.check_interval_minutes < 1440
+                        ? `${Math.round(page.check_interval_minutes / 60)}h`
+                        : `${Math.round(page.check_interval_minutes / 1440)}d`
+                      }
+                      size="small"
+                      sx={{
+                        bgcolor: alpha('#1976d2', 0.1),
+                        color: '#1976d2',
+                        fontWeight: 600,
+                        fontSize: '0.75rem',
+                      }}
+                    />
+                  </TableCell>
+
+                  {/* Actions cell — icons + buttons on one row, no wrapping */}
+                  <TableCell 
+                    sx={{ 
+                      py: 2,
+                      px: 2,
+                      verticalAlign: 'middle',
+                      borderBottom: '1px solid',
+                      borderColor: '#f0f0f0',
+                      bgcolor: hoveredRow === page.id ? alpha('#1976d2', 0.02) : 'transparent',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                      {/* Edit */}
+                      <Tooltip title="Edit page">
+                        <IconButton
+                          onClick={() => handleEditClick(page)}
+                          disabled={!page.is_active}
+                          size="small"
+                          sx={{
+                            color: '#9e9e9e',
+                            '&:hover': {
+                              color: '#1976d2',
+                              bgcolor: alpha('#1976d2', 0.1),
+                            },
+                          }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+
+                      {/* Delete */}
+                      <Tooltip title="Delete page">
+                        <IconButton
+                          onClick={() => {
+                            if (window.confirm(`Delete "${page.display_name || page.url}"?`)) {
+                              onPageDeleted(page.id);
+                            }
+                          }}
+                          disabled={deletingPages.has(page.id)}
+                          size="small"
+                          sx={{
+                            color: '#9e9e9e',
+                            '&:hover': {
+                              color: '#d32f2f',
+                              bgcolor: alpha('#d32f2f', 0.1),
+                            },
+                          }}
+                        >
+                          {deletingPages.has(page.id) ? (
+                            <CircularProgress size={16} />
+                          ) : (
+                            <DeleteIcon fontSize="small" />
+                          )}
+                        </IconButton>
+                      </Tooltip>
+
+                      {/* Check Now */}
                       <Tooltip title="Check for changes now">
                         <span>
                           <Button
@@ -570,24 +607,29 @@ const PageList: React.FC<PageListProps> = ({
                             disabled={crawlingPages.has(page.id) || !page.is_active}
                             startIcon={
                               crawlingPages.has(page.id) ? (
-                                <CircularProgress size={14} color="inherit" />
+                                <CircularProgress size={13} color="inherit" />
                               ) : (
-                                <RefreshIcon />
+                                <RefreshIcon sx={{ fontSize: '16px !important' }} />
                               )
                             }
-                            sx={{ 
-                              width: '100%',
-                              height: 32,
-                              fontSize: '0.875rem',
-                              textTransform: 'none',
-                              borderRadius: 1.25,
-                              boxShadow: 'none',
+                            sx={{
+                              height: 34,
                               px: 1.5,
-                              minWidth: 'auto',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              textTransform: 'none',
+                              borderRadius: 1.5,
+                              background: '#1976d2',
+                              boxShadow: 'none',
                               whiteSpace: 'nowrap',
+                              minWidth: 'max-content',
+                              '& .MuiButton-startIcon': { mr: 0.5 },
                               '&:hover': {
-                                boxShadow: '0 1px 4px rgba(37, 99, 235, 0.2)',
-                              }
+                                background: '#1565c0',
+                                transform: 'translateY(-1px)',
+                                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.3)',
+                              },
+                              transition: 'all 0.2s ease',
                             }}
                           >
                             {crawlingPages.has(page.id) ? 'Checking...' : 'Check Now'}
@@ -595,11 +637,11 @@ const PageList: React.FC<PageListProps> = ({
                         </span>
                       </Tooltip>
 
-                      {/* Fact Check Button */}
+                      {/* Fact Check */}
                       <Tooltip 
                         title={
                           hasVersionsForFactCheck(page) 
-                            ? "Analyze content with fact checking" 
+                            ? "Analyze content with AI fact checking" 
                             : "Check the page first to enable fact checking"
                         }
                       >
@@ -609,22 +651,23 @@ const PageList: React.FC<PageListProps> = ({
                             size="small"
                             onClick={() => navigate(`/fact-check/${page.id}`)}
                             disabled={!hasVersionsForFactCheck(page)}
-                            startIcon={<FactCheckIcon />}
-                            sx={{ 
-                              width: '100%',
-                              height: 32,
-                              fontSize: '0.875rem',
-                              textTransform: 'none',
-                              borderRadius: 1.25,
+                            startIcon={<FactCheckIcon sx={{ fontSize: '16px !important' }} />}
+                            sx={{
+                              height: 34,
                               px: 1.5,
-                              minWidth: 'auto',
+                              fontSize: '0.75rem',
+                              fontWeight: 600,
+                              textTransform: 'none',
+                              borderRadius: 1.5,
                               whiteSpace: 'nowrap',
-                              borderColor: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.300',
-                              color: hasVersionsForFactCheck(page) ? 'primary.main' : 'grey.500',
+                              minWidth: 'max-content',
+                              '& .MuiButton-startIcon': { mr: 0.5 },
+                              borderColor: hasVersionsForFactCheck(page) ? '#1976d2' : '#e0e0e0',
+                              color: hasVersionsForFactCheck(page) ? '#1976d2' : '#bdbdbd',
                               '&:hover': {
-                                borderColor: hasVersionsForFactCheck(page) ? 'primary.dark' : 'grey.400',
-                                backgroundColor: hasVersionsForFactCheck(page) ? 'primary.50' : 'transparent',
-                              }
+                                borderColor: hasVersionsForFactCheck(page) ? '#1565c0' : '#bdbdbd',
+                                backgroundColor: hasVersionsForFactCheck(page) ? alpha('#1976d2', 0.05) : 'transparent',
+                              },
                             }}
                           >
                             Fact Check
@@ -632,10 +675,10 @@ const PageList: React.FC<PageListProps> = ({
                         </span>
                       </Tooltip>
                     </Box>
-                  </Box>
-                </TableCell>
-              </TableRow>
-            ))}
+                  </TableCell>
+                </motion.tr>
+              ))}
+            </AnimatePresence>
           </TableBody>
         </Table>
       </TableContainer>
@@ -647,15 +690,27 @@ const PageList: React.FC<PageListProps> = ({
         maxWidth="sm"
         fullWidth
         PaperProps={{
-          sx: { borderRadius: 2 }
+          sx: { 
+            borderRadius: 2,
+            overflow: 'hidden',
+          }
         }}
       >
-        <DialogTitle sx={{ borderBottom: 1, borderColor: 'divider', pb: 2 }}>
-          Edit Page
-        </DialogTitle>
+        <Box sx={{ 
+          background: '#1976d2',
+          p: 3,
+          color: 'white',
+        }}>
+          <DialogTitle sx={{ p: 0, mb: 1, fontSize: '1.5rem', fontWeight: 'bold' }}>
+            Edit Page
+          </DialogTitle>
+          <Typography variant="body2" sx={{ opacity: 0.9 }}>
+            Update monitoring settings for your tracked page
+          </Typography>
+        </Box>
+        
         <DialogContent sx={{ pt: 3 }}>
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-            {/* Display Name Field */}
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5, mt: 1 }}>
             <TextField
               label="Display Name"
               value={editFormData.display_name}
@@ -664,24 +719,31 @@ const PageList: React.FC<PageListProps> = ({
                 display_name: e.target.value
               })}
               fullWidth
-              required
               disabled={editLoading}
               size="medium"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  '&:hover fieldset': { borderColor: '#1976d2' },
+                  '&.Mui-focused fieldset': { borderColor: '#1976d2' },
+                },
+              }}
             />
 
-            {/* URL Field (read-only) */}
             <TextField
               label="URL"
               value={editingPage?.url || ''}
               fullWidth
               disabled
               size="medium"
-              InputProps={{
-                readOnly: true,
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  bgcolor: alpha('#000', 0.02),
+                },
               }}
             />
 
-            {/* Check Interval Field */}
             <TextField
               select
               label="Check Interval"
@@ -693,38 +755,52 @@ const PageList: React.FC<PageListProps> = ({
               fullWidth
               disabled={editLoading}
               size="medium"
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  '&:hover fieldset': { borderColor: '#1976d2' },
+                  '&.Mui-focused fieldset': { borderColor: '#1976d2' },
+                },
+              }}
             >
               {intervalOptions.map((option) => (
                 <MenuItem key={option.value} value={option.value}>
-                  {option.label}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body1">{option.icon}</Typography>
+                    <Typography>{option.label}</Typography>
+                  </Box>
                 </MenuItem>
               ))}
             </TextField>
 
-            {/* Error Display */}
             {editError && (
-              <Typography 
-                color="error" 
-                variant="body2"
-                sx={{ 
-                  p: 1.5, 
-                  borderRadius: 1, 
-                  backgroundColor: 'error.light',
-                  border: '1px solid',
-                  borderColor: 'error.main'
-                }}
-              >
-                {editError}
-              </Typography>
+              <Fade in>
+                <Box sx={{ 
+                  p: 2, 
+                  borderRadius: 2, 
+                  bgcolor: alpha('#d32f2f', 0.1),
+                  border: `1px solid ${alpha('#d32f2f', 0.3)}`,
+                }}>
+                  <Typography color="error" variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <WarningIcon fontSize="small" />
+                    {editError}
+                  </Typography>
+                </Box>
+              </Fade>
             )}
           </Box>
         </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: 'divider' }}>
+        
+        <DialogActions sx={{ px: 3, py: 2, borderTop: 1, borderColor: '#e0e0e0', gap: 1 }}>
           <Button 
             onClick={() => setEditingPage(null)} 
             disabled={editLoading}
-            color="inherit"
-            sx={{ minWidth: 90 }}
+            sx={{ 
+              borderRadius: 2,
+              px: 3,
+              color: '#757575',
+              '&:hover': { bgcolor: alpha('#757575', 0.05) },
+            }}
           >
             Cancel
           </Button>
@@ -732,8 +808,17 @@ const PageList: React.FC<PageListProps> = ({
             onClick={handleEditSubmit} 
             disabled={editLoading}
             variant="contained"
-            color="primary"
-            sx={{ minWidth: 120 }}
+            sx={{ 
+              borderRadius: 2,
+              px: 4,
+              background: '#1976d2',
+              '&:hover': {
+                background: '#1565c0',
+                transform: 'translateY(-1px)',
+                boxShadow: '0 4px 12px rgba(25, 118, 210, 0.4)',
+              },
+              transition: 'all 0.2s ease',
+            }}
           >
             {editLoading ? (
               <>
