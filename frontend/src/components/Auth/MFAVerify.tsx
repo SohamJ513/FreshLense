@@ -8,16 +8,28 @@ import {
   Alert, 
   CircularProgress, 
   Paper,
-  Container
+  Container,
+  Checkbox,
+  FormControlLabel,
+  Divider
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../../contexts/AuthContext';
-import { resendMFACode } from '../../services/mfaApi';
+import { resendMFACode, verifyMFA } from '../../services/mfaApi';
 import { useNavigate } from 'react-router-dom';
 
 interface MFAVerifyProps {
   email: string;
   onBackToLogin?: () => void;
+}
+
+interface MFAVerifyResponse {
+  access_token: string;
+  token_type: string;
+  email: string;
+  message: string;
+  mfa_session_token?: string;
+  expires_in?: number;
 }
 
 const CodeInput = styled(TextField)(({ theme }) => ({
@@ -48,15 +60,15 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [resendLoading, setResendLoading] = useState<boolean>(false);
-  const [timeLeft, setTimeLeft] = useState<number>(600); // 10 minutes in seconds
+  const [timeLeft, setTimeLeft] = useState<number>(600);
   const [canResend, setCanResend] = useState<boolean>(false);
   const [resendMessage, setResendMessage] = useState<string>('');
+  const [rememberForDay, setRememberForDay] = useState<boolean>(true);
   
   const { loginWithMFA } = useAuth();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Timer countdown
   useEffect(() => {
     if (timeLeft <= 0) {
       setCanResend(true);
@@ -76,14 +88,12 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
     return () => clearInterval(timer);
   }, [timeLeft]);
 
-  // Auto-focus on input
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
   }, []);
 
-  // Auto-submit when code is 6 digits
   useEffect(() => {
     if (code.length === 6 && !loading) {
       handleSubmit();
@@ -122,36 +132,56 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
       console.log('🔐 [MFA Component] Starting verification...');
       console.log('📧 Email:', email);
       console.log('🔢 Code:', code);
+      console.log('💾 Remember for 24 hours:', rememberForDay);
       
-      const result = await loginWithMFA(email, code);
+      const response = await verifyMFA(email, code, rememberForDay) as MFAVerifyResponse;
       
-      console.log('🔐 [MFA Component] Verification result:', result);
+      console.log('🔐 [MFA Component] Verification result:', response);
       
-      if (result.success) {
-        console.log('✅ [MFA Component] SUCCESS!');
+      if (response.access_token) {
+        // Clear any existing MFA state first
+        localStorage.removeItem('mfa_pending');
+        localStorage.removeItem('mfa_email');
         
-        // ✅ DEBUG: Check localStorage before redirect
-        const token = localStorage.getItem('token');
-        const user = localStorage.getItem('user');
-        console.log('🔍 [MFA Component] Before redirect - Token:', token ? `Present (${token.length} chars)` : 'Missing');
-        console.log('🔍 [MFA Component] Before redirect - User:', user ? 'Present' : 'Missing');
+        // Store the token
+        localStorage.setItem('token', response.access_token);
+        localStorage.setItem('user', JSON.stringify({ email: response.email }));
         
-        console.log('✅ [MFA Component] Token verified! Proceeding to redirect...');
+        // Store MFA session token if "Remember Me" was checked and token exists
+        if (rememberForDay && response.mfa_session_token) {
+          localStorage.setItem('mfa_session_token', response.mfa_session_token);
+          localStorage.setItem('mfa_verified_at', new Date().toISOString());
+          console.log('✅ MFA session token stored (valid for 24 hours)');
+        } else {
+          localStorage.removeItem('mfa_session_token');
+          localStorage.removeItem('mfa_verified_at');
+        }
         
-        // ✅ Wait 500ms for state to settle
-        console.log('⏳ [MFA Component] Waiting 500ms before redirect...');
+        console.log('✅ [MFA Component] SUCCESS! Token stored');
+        
+        // ✅ IMPORTANT: Clear any pending MFA state before redirect
+        if (onBackToLogin) {
+          // Don't call onBackToLogin - that would go back to login!
+          console.log('⚠️ Not calling onBackToLogin - going directly to dashboard');
+        }
+        
+        // ✅ Navigate directly to dashboard
+        console.log('🚀 [MFA Component] Now redirecting to dashboard...');
+        
+        // Small delay to ensure state is saved
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        console.log('🚀 [MFA Component] Now redirecting to dashboard...');
-        navigate('/dashboard');
+        // Use navigate with replace to prevent going back to MFA page
+        navigate('/dashboard', { replace: true });
+        
       } else {
-        console.error('❌ [MFA Component] Verification failed:', result.error);
-        throw new Error(result.error?.message || 'Invalid verification code. Please try again.');
+        console.error('❌ [MFA Component] Verification failed: No token received');
+        throw new Error('Invalid verification code. Please try again.');
       }
     } catch (err: any) {
       console.error('❌ [MFA Component] Error:', err);
       setError(err.message || 'Invalid verification code. Please try again.');
-      setCode(''); // Clear code on error
+      setCode('');
       if (inputRef.current) {
         inputRef.current.focus();
       }
@@ -177,8 +207,7 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
       console.log('✅ [MFA Component] Resend successful');
       setResendMessage('A new verification code has been sent to your email.');
       
-      // Reset timer
-      setTimeLeft(600); // 10 minutes
+      setTimeLeft(600);
       setCanResend(false);
       setCode('');
       
@@ -186,7 +215,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
         inputRef.current.focus();
       }
       
-      // Clear success message after 5 seconds
       setTimeout(() => {
         setResendMessage('');
       }, 5000);
@@ -206,10 +234,16 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
 
   const handleBack = () => {
     console.log('🔙 [MFA Component] Going back to login');
+    // Clear MFA state when going back
+    localStorage.removeItem('mfa_pending');
+    localStorage.removeItem('mfa_email');
+    localStorage.removeItem('temp_user_email');
+    localStorage.removeItem('temp_user_password');
+    
     if (onBackToLogin) {
       onBackToLogin();
     } else {
-      navigate('/login');
+      navigate('/login', { replace: true });
     }
   };
 
@@ -226,7 +260,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
       >
         <Paper elevation={3} sx={{ p: 4, width: '100%', maxWidth: 450, mx: 'auto' }}>
           <Box sx={{ textAlign: 'center' }}>
-            {/* Header */}
             <Typography variant="h5" component="h1" gutterBottom fontWeight="bold">
               🔐 Verify Your Identity
             </Typography>
@@ -237,7 +270,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               <strong>{email}</strong>
             </Typography>
 
-            {/* Timer */}
             <Box sx={{ mb: 3 }}>
               <TimerText color={timeLeft < 60 ? 'error' : timeLeft < 300 ? 'warning.main' : 'primary'}>
                 ⏳ Code expires in: {formatTime(timeLeft)}
@@ -249,7 +281,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               )}
             </Box>
 
-            {/* Error/Success Messages */}
             {error && (
               <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>
                 {error}
@@ -262,7 +293,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               </Alert>
             )}
 
-            {/* Code Input */}
             <Box sx={{ mb: 3 }}>
               <CodeInput
                 inputRef={inputRef}
@@ -282,7 +312,22 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               />
             </Box>
 
-            {/* Verify Button */}
+            <FormControlLabel
+              control={
+                <Checkbox
+                  checked={rememberForDay}
+                  onChange={(e) => setRememberForDay(e.target.checked)}
+                  color="primary"
+                />
+              }
+              label={
+                <Typography variant="body2">
+                  Remember me for 24 hours (no MFA required on this device)
+                </Typography>
+              }
+              sx={{ mb: 2, display: 'flex', justifyContent: 'center' }}
+            />
+
             <Button
               variant="contained"
               color="primary"
@@ -302,7 +347,6 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               )}
             </Button>
 
-            {/* Resend Code Button */}
             <ResendButton
               variant="outlined"
               color="secondary"
@@ -317,21 +361,26 @@ const MFAVerify: React.FC<MFAVerifyProps> = ({ email, onBackToLogin }) => {
               )}
             </ResendButton>
 
-            {/* Back to Login */}
+            <Divider sx={{ my: 2 }} />
+
             <Button
               variant="text"
               color="inherit"
               onClick={handleBack}
-              sx={{ mt: 2 }}
               fullWidth
             >
               ← Back to Login
             </Button>
 
-            {/* Help Text */}
             <Typography variant="caption" color="text.secondary" sx={{ mt: 3, display: 'block' }}>
               Can't find the email? Check your spam folder or ensure {email} is correct.
             </Typography>
+
+            {rememberForDay && (
+              <Typography variant="caption" color="info.main" sx={{ mt: 2, display: 'block' }}>
+                💡 You won't be asked for MFA again on this device for 24 hours
+              </Typography>
+            )}
           </Box>
         </Paper>
       </Box>

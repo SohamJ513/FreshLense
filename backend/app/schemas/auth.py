@@ -1,7 +1,8 @@
-# backend/schemas/auth.py
+# backend/app/schemas/auth.py
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 import re
+from datetime import datetime
 
 # Existing schemas (keep these)
 class ForgotPasswordRequest(BaseModel):
@@ -68,7 +69,7 @@ class ChangePasswordResponse(BaseModel):
     """Response for password change"""
     message: str = "Password changed successfully"
 
-# ✅ ADD THESE MFA SCHEMAS BELOW
+# ✅ MFA SCHEMAS WITH "REMEMBER ME FOR 24 HOURS" FEATURE
 
 class UserLogin(BaseModel):
     """Schema for user login"""
@@ -112,6 +113,8 @@ class User(BaseModel):
     mfa_enabled: bool = False
     mfa_email: Optional[str] = None
     mfa_setup_completed: bool = False
+    mfa_verified_at: Optional[datetime] = None  # Track when MFA was last verified
+    mfa_session_token: Optional[str] = None  # Track MFA session token
 
 class MFASetupRequest(BaseModel):
     """Schema for enabling MFA"""
@@ -129,9 +132,10 @@ class MFASetupRequest(BaseModel):
         return v.lower().strip()
 
 class MFAVerifyRequest(BaseModel):
-    """Schema for verifying MFA code"""
+    """Schema for verifying MFA code with "Remember Me" support"""
     email: EmailStr
     mfa_code: str = Field(..., min_length=6, max_length=6, description="6-digit MFA code")
+    remember_for_day: bool = Field(default=False, description="Remember MFA for 24 hours")
     
     @field_validator('email')
     @classmethod
@@ -156,3 +160,35 @@ class MFALoginResponse(BaseModel):
     message: str
     access_token: Optional[str] = None
     token_type: Optional[str] = None
+    mfa_session_token: Optional[str] = None  # Add MFA session token
+    expires_in: Optional[int] = None  # Expiry time in seconds (86400 for 24 hours)
+
+class MFASessionCheckRequest(BaseModel):
+    """Schema for checking if MFA session is still valid"""
+    email: EmailStr
+    mfa_session_token: Optional[str] = Field(default=None, description="MFA session token")
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email_format(cls, v):
+        """Email validation"""
+        if not re.match(r'[^@]+@[^@]+\.[^@]+', v):
+            raise ValueError('Invalid email format')
+        return v.lower().strip()
+
+class MFASessionCheckResponse(BaseModel):
+    """Schema for MFA session check response"""
+    mfa_required: bool
+    mfa_valid: bool = False
+    session_exists: bool = False
+    expires_at: Optional[datetime] = None
+    time_remaining_hours: Optional[float] = None
+
+class LogoutRequest(BaseModel):
+    """Schema for logout request (optional, for token invalidation)"""
+    email: EmailStr
+    logout_all_devices: bool = Field(default=False, description="Logout from all devices")
+
+class LogoutResponse(BaseModel):
+    """Schema for logout response"""
+    message: str = "Logged out successfully"

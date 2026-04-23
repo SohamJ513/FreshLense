@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { authAPI, isMFARequiredError, getMFADataFromError, LoginResponse, tokenUtils, testAPIConnection } from '../services/api';
 import { MFALoginResponse } from '../types/mfa';
-import { verifyMFACode } from '../services/mfaApi';
+import { verifyMFACode, checkMFASession, clearMFASession, isStoredMFASessionValid, getStoredMFASessionToken } from '../services/mfaApi';
 import api from '../services/api';
 
 interface User {
@@ -15,15 +15,16 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: any }>;
-  loginWithMFA: (email: string, mfaCode: string) => Promise<{ success: boolean; error?: any }>;
+  loginWithMFA: (email: string, mfaCode: string, rememberForDay?: boolean) => Promise<{ success: boolean; error?: any }>;
   register: (email: string, password: string) => Promise<{ success: boolean; message?: string; redirectToLogin?: boolean; error?: any }>;
   logout: () => void;
-  logoutWithConfirmation?: () => Promise<boolean>; // Optional: if you want confirmation at context level
+  logoutWithConfirmation?: () => Promise<boolean>;
   loading: boolean;
   isAuthenticated: boolean;
   mfaEmail: string | null;
   clearMFAEmail: () => void;
   validateToken: () => Promise<boolean>;
+  skipMFAForSession: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -54,8 +55,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState<string | null>(null);
   const [mfaEmail, setMfaEmail] = useState<string | null>(null);
+  const [skipMFAForSession, setSkipMFAForSession] = useState<boolean>(false);
 
-  // ✅ FIXED: Function to validate token with backend - REMOVED DOUBLE /api/
+  // Function to validate token with backend
   const validateTokenWithBackend = async (): Promise<boolean> => {
     const storedToken = localStorage.getItem('token');
     if (!storedToken) {
@@ -65,7 +67,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
     try {
       console.log('🔍 [Auth] Validating token with backend...');
-      // ✅ FIXED: Use authAPI.validateToken() instead of direct api.post()
       const response = await authAPI.validateToken(storedToken);
       return response.data.valid === true;
     } catch (error) {
@@ -74,21 +75,50 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // ✅ NEW: Function to sync auth state
+  // Function to check MFA session validity
+  const checkMFASessionValidity = async (email: string): Promise<boolean> => {
+    const mfaSessionToken = getStoredMFASessionToken();
+    
+    if (!mfaSessionToken || !isStoredMFASessionValid()) {
+      console.log('🔐 [Auth] No valid MFA session found in storage');
+      return false;
+    }
+    
+    try {
+      console.log('🔐 [Auth] Checking MFA session with backend...');
+      const result = await checkMFASession(email, mfaSessionToken);
+      
+      if (!result.mfa_required && result.mfa_valid) {
+        console.log('✅ [Auth] Valid MFA session found, skipping MFA');
+        return true;
+      } else {
+        console.log('❌ [Auth] MFA session invalid, clearing');
+        clearMFASession();
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ [Auth] MFA session check failed:', error);
+      clearMFASession();
+      return false;
+    }
+  };
+
+  // Function to sync auth state
   const syncAuthState = async () => {
     const storedToken = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
     const storedMFAEmail = localStorage.getItem('mfa_email');
     const storedMFAPending = localStorage.getItem('mfa_pending') === 'true';
+    const storedSkipMFA = localStorage.getItem('skip_mfa_session') === 'true';
     
     console.log('🔍 [Auth] Syncing auth state:', {
       hasToken: !!storedToken,
       hasUser: !!storedUser,
       mfaEmail: storedMFAEmail,
-      mfaPending: storedMFAPending
+      mfaPending: storedMFAPending,
+      skipMFA: storedSkipMFA
     });
 
-    // First, validate token if exists
     if (storedToken) {
       const isValid = await validateTokenWithBackend();
       
@@ -98,16 +128,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         if (storedUser) {
           try {
-            setUser(JSON.parse(storedUser));
+            const parsedUser = JSON.parse(storedUser);
+            setUser(parsedUser);
+            
+            if (storedSkipMFA && parsedUser.email) {
+              const hasValidMFASession = await checkMFASessionValidity(parsedUser.email);
+              setSkipMFAForSession(hasValidMFASession);
+              if (hasValidMFASession) {
+                console.log('✅ [Auth] User has valid MFA session, will skip MFA on next login');
+              }
+            }
           } catch (error) {
             console.error('Failed to parse stored user:', error);
           }
         }
         
-        // Configure axios with token
         tokenUtils.setToken(storedToken);
         
-        // Clear any MFA state if we have valid token
         if (storedMFAPending || storedMFAEmail) {
           localStorage.removeItem('mfa_pending');
           localStorage.removeItem('mfa_email');
@@ -118,12 +155,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         clearAuthState();
       }
     } else {
-      // If no token but MFA state exists, restore MFA state
       if (storedMFAEmail) {
         console.log('🔐 [Auth] Restoring MFA state for:', storedMFAEmail);
         setMfaEmail(storedMFAEmail);
       } else {
-        // Ensure clean state
         clearAuthState();
       }
     }
@@ -131,7 +166,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setLoading(false);
   };
 
-  // ✅ NEW: Function to clear auth state
+  // Function to clear auth state
   const clearAuthState = () => {
     console.log('🗑️ [Auth] Clearing auth state');
     localStorage.removeItem('token');
@@ -139,36 +174,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     localStorage.removeItem('mfa_pending');
     localStorage.removeItem('mfa_email');
     localStorage.removeItem('temp_user_email');
+    localStorage.removeItem('skip_mfa_session');
     
     setToken(null);
     setUser(null);
     setMfaEmail(null);
+    setSkipMFAForSession(false);
     
     tokenUtils.clearAuthData();
+    clearMFASession();
   };
 
   useEffect(() => {
     syncAuthState();
   }, []);
 
-  // ✅ NEW: Function to store auth data consistently
-  const storeAuthData = (accessToken: string, userEmail: string) => {
+  // Function to store auth data consistently
+  const storeAuthData = (accessToken: string, userEmail: string, mfaSessionToken?: string) => {
     console.log('💾 [Auth] Storing auth data for:', userEmail);
     
     const userData = { email: userEmail };
     
-    // Store in localStorage
     localStorage.setItem('token', accessToken);
     localStorage.setItem('user', JSON.stringify(userData));
     
-    // Store in state
+    if (mfaSessionToken) {
+      localStorage.setItem('mfa_session_token', mfaSessionToken);
+      localStorage.setItem('mfa_verified_at', new Date().toISOString());
+      localStorage.setItem('skip_mfa_session', 'true');
+      setSkipMFAForSession(true);
+      console.log('✅ [Auth] MFA session token stored (valid for 24 hours)');
+    }
+    
     setToken(accessToken);
     setUser(userData);
-    
-    // Configure axios
     tokenUtils.setToken(accessToken);
-    
-    // Clear MFA state
     localStorage.removeItem('mfa_pending');
     localStorage.removeItem('mfa_email');
     setMfaEmail(null);
@@ -176,7 +216,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     console.log('✅ [Auth] Auth data stored and synchronized');
   };
 
-  // ✅ Helper to extract error message
+  // Helper to extract error message
   const getErrorMessage = (error: any): string => {
     if (typeof error === 'string') return error;
     if (error.response?.data?.detail) {
@@ -194,39 +234,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return 'An error occurred';
   };
 
-  // ✅ Updated login function - ALWAYS expects MFA from backend
+  // Login function
   const login = async (email: string, password: string) => {
     try {
-      // Clear previous auth state
       clearAuthState();
       
       console.log('🔐 [Auth] Login attempt for:', email);
       
-      // Test API connection first
+      const hasValidMFASession = await checkMFASessionValidity(email);
+      if (hasValidMFASession) {
+        console.log('✅ [Auth] Valid MFA session found, attempting auto-login');
+        
+        const response = await authAPI.login({ email, password });
+        const responseData = response.data;
+        
+        if (isLoginResponse(responseData)) {
+          console.log('✅ [Auth] Auto-login successful via MFA session');
+          storeAuthData(responseData.access_token, email, getStoredMFASessionToken() || undefined);
+          return { success: true };
+        }
+      }
+      
       const apiTest = await testAPIConnection();
       if (!apiTest.success) {
         throw new Error(`Backend is not reachable: ${apiTest.message}`);
       }
       
-      const response = await authAPI.login({
-        email: email,
-        password: password,
-      });
-      
-      console.log('🔐 [Auth] Login response:', response.data);
-      
+      const response = await authAPI.login({ email, password });
       const responseData = response.data;
       
-      // ✅ Backend ALWAYS returns MFA required response
       if (isMFAResponse(responseData)) {
         console.log('🔐 [Auth] MFA required detected - storing state');
         
-        // Store MFA state in localStorage for persistence
         const mfaEmailToStore = responseData.email || email;
         localStorage.setItem('mfa_pending', 'true');
         localStorage.setItem('mfa_email', mfaEmailToStore);
-        
-        // Update state
         setMfaEmail(mfaEmailToStore);
         
         return { 
@@ -239,7 +281,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
       
-      // Fallback for any unexpected response
       if (isLoginResponse(responseData)) {
         console.log('⚠️ [Auth] Unexpected token response (MFA should be required)');
         storeAuthData(responseData.access_token, email);
@@ -251,12 +292,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error: any) {
       console.error('❌ [Auth] Login error:', error);
       
-      // Check if error is MFA-related
       if (isMFARequiredError(error)) {
         console.log('🔐 [Auth] MFA error detected via helper');
         const mfaData = getMFADataFromError(error);
         if (mfaData) {
-          // Store MFA state
           const mfaEmailToStore = mfaData.email || email;
           localStorage.setItem('mfa_pending', 'true');
           localStorage.setItem('mfa_email', mfaEmailToStore);
@@ -283,16 +322,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // ✅ Login with MFA verification
-  const loginWithMFA = async (email: string, mfaCode: string) => {
+  // ✅ FIXED: Login with MFA - ensures proper navigation
+  const loginWithMFA = async (email: string, mfaCode: string, rememberForDay: boolean = true) => {
     try {
       console.log('🚀 [Auth] MFA verification for:', email);
+      console.log('💾 [Auth] Remember for 24 hours:', rememberForDay);
       
-      const mfaResponse = await verifyMFACode(email, mfaCode);
+      const mfaResponse = await verifyMFACode(email, mfaCode, rememberForDay);
       
       console.log('✅ [Auth] MFA verification API response received');
       
-      const accessToken = (mfaResponse as any).access_token;
+      const accessToken = mfaResponse.access_token;
+      const mfaSessionToken = (mfaResponse as any).mfa_session_token;
       
       if (!accessToken) {
         console.error('❌ [Auth] No access token in MFA response');
@@ -302,15 +343,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('🔑 [Auth] Token received, length:', accessToken.length);
       
       // Store auth data
-      storeAuthData(accessToken, email);
+      storeAuthData(accessToken, email, mfaSessionToken);
       
-      // Clear MFA state
+      // Clear all MFA state
       localStorage.removeItem('mfa_pending');
       localStorage.removeItem('mfa_email');
+      localStorage.removeItem('temp_user_email');
+      localStorage.removeItem('temp_user_password');
       setMfaEmail(null);
       
       console.log('🎉 [Auth] MFA login completed successfully');
       
+      // ✅ CRITICAL: Return success so MFAVerify component can navigate to dashboard
       return { success: true };
     } catch (error: any) {
       console.error('❌ [Auth] MFA verification error:', error);
@@ -325,7 +369,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // ✅ UPDATED: Registration - no auto-login, redirect to login
+  // Registration
   const register = async (email: string, password: string) => {
     try {
       console.log('📝 [Auth] Registration for:', email);
@@ -334,7 +378,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       console.log('📝 [Auth] Registration response:', response.data);
       
-      // ✅ Registration successful - return success with message, redirect to login
       if (response.data.message) {
         console.log('✅ [Auth] Registration successful, redirecting to login');
         return { 
@@ -344,7 +387,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
       
-      // Fallback success response
       return { 
         success: true, 
         message: "Registration successful! Please login to continue.",
@@ -363,11 +405,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  // ✅ UPDATED: Logout function with optional callback for custom handling
+  // Logout
   const logout = () => {
     console.log('👋 [Auth] Logging out');
     
-    // Optional: Call backend logout endpoint to blacklist token
     const performLogout = async () => {
       try {
         const currentToken = localStorage.getItem('token');
@@ -382,7 +423,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
     };
     
-    // Execute async logout but don't wait for it
     performLogout();
   };
 
@@ -393,7 +433,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setMfaEmail(null);
   };
 
-  // ✅ FIXED: Public method to validate token
   const validateToken = async (): Promise<boolean> => {
     return await validateTokenWithBackend();
   };
@@ -410,6 +449,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     mfaEmail,
     clearMFAEmail,
     validateToken,
+    skipMFAForSession,
   };
 
   return (

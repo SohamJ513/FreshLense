@@ -42,6 +42,8 @@ try:
         users_collection.create_index([("created_at", DESCENDING)])
         users_collection.create_index([("mfa_code_expires", ASCENDING)])
         users_collection.create_index([("is_deleted", ASCENDING)])
+        users_collection.create_index([("mfa_verified_at", ASCENDING)])  # ✅ NEW: For MFA session queries
+        users_collection.create_index([("mfa_session_token", ASCENDING)])  # ✅ NEW: For MFA session lookups
         
         # Pages indexes
         pages_collection.create_index([("user_id", ASCENDING), ("url", ASCENDING)], unique=True)
@@ -183,6 +185,9 @@ def create_user(user_data: dict):
         "mfa_code": None,
         "mfa_code_expires": None,
         "mfa_setup_completed": user_data.get('mfa_setup_completed', False),
+        # ✅ NEW: MFA session tracking for "Remember Me" feature
+        "mfa_verified_at": user_data.get('mfa_verified_at', None),
+        "mfa_session_token": user_data.get('mfa_session_token', None),
         "updated_at": datetime.utcnow()
     }
     
@@ -259,6 +264,8 @@ def get_user_mfa_status(user_id):
                 "mfa_enabled": 1,
                 "mfa_email": 1,
                 "mfa_setup_completed": 1,
+                "mfa_verified_at": 1,
+                "mfa_session_token": 1,
                 "notification_preferences": 1
             }
         )
@@ -346,6 +353,218 @@ def clear_user_mfa_code(user_id):
     except Exception as e:
         print(f"Error clearing user MFA code: {e}")
         return False
+
+
+# ✅ NEW: MFA Session Management Functions for "Remember Me" feature
+
+def update_user_mfa_session(user_id, mfa_verified_at: datetime, mfa_session_token: str) -> bool:
+    """Update user's MFA session information for "Remember Me" feature"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        result = users_collection.update_one(
+            {
+                "_id": user_id,
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "$set": {
+                    "mfa_verified_at": mfa_verified_at,
+                    "mfa_session_token": mfa_session_token,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating user MFA session: {e}")
+        return False
+
+
+def clear_user_mfa_session(user_id) -> bool:
+    """Clear user's MFA session (for logout or session expiration)"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        result = users_collection.update_one(
+            {
+                "_id": user_id,
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "$set": {
+                    "mfa_verified_at": None,
+                    "mfa_session_token": None,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error clearing user MFA session: {e}")
+        return False
+
+
+def get_user_mfa_session(user_id):
+    """Get user's MFA session information"""
+    if db is None:
+        return None
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        user = users_collection.find_one(
+            {
+                "_id": user_id,
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "mfa_verified_at": 1,
+                "mfa_session_token": 1,
+                "email": 1
+            }
+        )
+        return user
+    except Exception as e:
+        print(f"Error getting user MFA session: {e}")
+        return None
+
+
+def is_mfa_session_valid(user_id, mfa_session_token: str = None) -> tuple:
+    """Check if MFA session is still valid (within 24 hours)"""
+    if db is None:
+        return False, "Database not available"
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        user = users_collection.find_one(
+            {
+                "_id": user_id,
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "mfa_verified_at": 1,
+                "mfa_session_token": 1,
+                "email": 1
+            }
+        )
+        
+        if not user:
+            return False, "User not found"
+        
+        mfa_verified_at = user.get("mfa_verified_at")
+        stored_session_token = user.get("mfa_session_token")
+        
+        if not mfa_verified_at or not stored_session_token:
+            return False, "No active MFA session"
+        
+        # Convert string to datetime if needed
+        if isinstance(mfa_verified_at, str):
+            try:
+                mfa_verified_at = datetime.fromisoformat(mfa_verified_at.replace('Z', '+00:00'))
+            except ValueError:
+                return False, "Invalid session data"
+        
+        # Check if within 24 hours
+        time_elapsed = datetime.utcnow() - mfa_verified_at
+        if time_elapsed >= timedelta(hours=24):
+            # Session expired, clear it
+            clear_user_mfa_session(user_id)
+            return False, "Session expired (more than 24 hours)"
+        
+        # Check token if provided
+        if mfa_session_token and mfa_session_token != stored_session_token:
+            return False, "Invalid session token"
+        
+        hours_remaining = 24 - (time_elapsed.total_seconds() / 3600)
+        return True, f"Session valid for {hours_remaining:.1f} more hours"
+        
+    except Exception as e:
+        print(f"Error checking MFA session validity: {e}")
+        return False, "Internal server error"
+
+
+def get_valid_mfa_sessions() -> list:
+    """Get all users with valid MFA sessions (for cleanup or monitoring)"""
+    if db is None:
+        return []
+    
+    try:
+        # Get all users with MFA sessions
+        users = users_collection.find(
+            {
+                "mfa_verified_at": {"$ne": None},
+                "mfa_session_token": {"$ne": None},
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "email": 1,
+                "mfa_verified_at": 1,
+                "mfa_session_token": 1
+            }
+        )
+        
+        valid_sessions = []
+        for user in users:
+            mfa_verified_at = user.get("mfa_verified_at")
+            if isinstance(mfa_verified_at, str):
+                try:
+                    mfa_verified_at = datetime.fromisoformat(mfa_verified_at.replace('Z', '+00:00'))
+                except ValueError:
+                    continue
+            
+            if mfa_verified_at and (datetime.utcnow() - mfa_verified_at) < timedelta(hours=24):
+                valid_sessions.append(user)
+        
+        return valid_sessions
+    except Exception as e:
+        print(f"Error getting valid MFA sessions: {e}")
+        return []
+
+
+def cleanup_expired_mfa_sessions() -> int:
+    """Clean up expired MFA sessions (older than 24 hours)"""
+    if db is None:
+        return 0
+    
+    try:
+        # Calculate cutoff time (24 hours ago)
+        cutoff_time = datetime.utcnow() - timedelta(hours=24)
+        
+        # Convert to string if stored as string, or keep as datetime
+        result = users_collection.update_many(
+            {
+                "mfa_verified_at": {"$lt": cutoff_time},
+                "mfa_verified_at": {"$ne": None},
+                "is_deleted": {"$ne": True}
+            },
+            {
+                "$set": {
+                    "mfa_verified_at": None,
+                    "mfa_session_token": None,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.modified_count > 0:
+            print(f"✅ Cleaned up {result.modified_count} expired MFA sessions")
+        
+        return result.modified_count
+    except Exception as e:
+        print(f"Error cleaning up expired MFA sessions: {e}")
+        return 0
 
 
 def verify_user_mfa_code(user_id, input_code: str):
@@ -711,7 +930,7 @@ def create_page_version(
     significance_score: float = 1.0,
     change_metrics: Optional[Dict[str, Any]] = None,
     metadata: Optional[Dict[str, Any]] = None,
-    ai_summary: Optional[Dict[str, Any]] = None  # ✅ NEW: AI summary parameter
+    ai_summary: Optional[Dict[str, Any]] = None
 ):
     """✅ UPDATED: Create a new page version with smart versioning and AI summary fields"""
     if db is None:
@@ -1171,6 +1390,12 @@ def check_database_health():
         page_count = pages_collection.count_documents({})
         mfa_enabled_count = users_collection.count_documents({"mfa_enabled": True, "is_deleted": {"$ne": True}})
         
+        # MFA session stats
+        active_mfa_sessions = users_collection.count_documents({
+            "mfa_verified_at": {"$ne": None},
+            "is_deleted": {"$ne": True}
+        })
+        
         # Version statistics with AI summaries
         total_versions = versions_collection.count_documents({})
         significant_versions = versions_collection.count_documents({"change_significance_score": {"$gte": 0.3}})
@@ -1199,6 +1424,10 @@ def check_database_health():
                 "ttl_indexes_found": len(ttl_indexes),
                 "ttl_indexes": ttl_indexes,
                 "protection_status": "SAFE" if len(ttl_indexes) == 0 else "WARNING"
+            },
+            "mfa_sessions": {
+                "active_sessions": active_mfa_sessions,
+                "session_policy": "24_hours_expiry"
             },
             "versioning_stats": {
                 "total_versions": total_versions,

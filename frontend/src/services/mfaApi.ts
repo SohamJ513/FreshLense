@@ -1,17 +1,35 @@
-// chrome_extension/frontend/src/services/mfaApi.ts
+// frontend/src/services/mfaApi.ts
 import { authAPI } from './api';
 import type { 
   MFALoginResponse,
-  MFAVerificationResponse,
-  MFAStatus  // Changed from MFAStatusResponse to MFAStatus
+  MFAStatus
 } from '../types/mfa';
 
 /**
- * Verify MFA code
+ * MFA Verification Response with optional session token for "Remember Me" feature
  */
-export const verifyMFACode = async (email: string, mfaCode: string): Promise<MFAVerificationResponse> => {
+export interface MFAVerificationResponse {
+  access_token: string;
+  token_type: string;
+  email: string;
+  message: string;
+  mfa_session_token?: string;  // For "Remember Me" feature - stores session token
+  expires_in?: number;          // Expiry in seconds (86400 = 24 hours)
+}
+
+/**
+ * Verify MFA code with optional "Remember Me" feature
+ * @param email - User's email address
+ * @param mfaCode - 6-digit MFA code
+ * @param rememberForDay - If true, MFA session will be remembered for 24 hours
+ */
+export const verifyMFACode = async (
+  email: string, 
+  mfaCode: string, 
+  rememberForDay: boolean = false
+): Promise<MFAVerificationResponse> => {
   try {
-    const response = await authAPI.verifyMFA(email, mfaCode);
+    const response = await authAPI.verifyMFA(email, mfaCode, rememberForDay);
     return response.data;
   } catch (error: any) {
     console.error('MFA verification error:', error);
@@ -22,6 +40,11 @@ export const verifyMFACode = async (email: string, mfaCode: string): Promise<MFA
     );
   }
 };
+
+/**
+ * Alias for verifyMFACode - keeps compatibility with existing code
+ */
+export const verifyMFA = verifyMFACode;
 
 /**
  * Send MFA code to user's email
@@ -42,7 +65,7 @@ export const resendMFACode = async (email: string): Promise<{ message: string }>
 /**
  * Get MFA status for a user
  */
-export const getMFAStatus = async (email: string): Promise<MFAStatus> => {  // Changed to MFAStatus
+export const getMFAStatus = async (email: string): Promise<MFAStatus> => {
   try {
     const response = await authAPI.getMFAStatus(email);
     return response.data;
@@ -84,9 +107,59 @@ export const disableMFA = async (email: string): Promise<{ message: string }> =>
   }
 };
 
-// Export types
+/**
+ * Check if MFA session is still valid (for "Remember Me" feature)
+ * @param email - User's email address
+ * @param mfaSessionToken - Optional session token for validation
+ */
+export const checkMFASession = async (
+  email: string, 
+  mfaSessionToken?: string
+): Promise<{ mfa_required: boolean; mfa_valid: boolean; session_exists?: boolean }> => {
+  try {
+    const response = await authAPI.checkMFASession(email, mfaSessionToken);
+    return response.data;
+  } catch (error: any) {
+    console.error('Check MFA session error:', error);
+    return { mfa_required: true, mfa_valid: false };
+  }
+};
+
+/**
+ * Clear MFA session on logout
+ */
+export const clearMFASession = (): void => {
+  localStorage.removeItem('mfa_session_token');
+  localStorage.removeItem('mfa_verified_at');
+  console.log('✅ MFA session cleared');
+};
+
+/**
+ * Get stored MFA session token
+ */
+export const getStoredMFASessionToken = (): string | null => {
+  return localStorage.getItem('mfa_session_token');
+};
+
+/**
+ * Check if stored MFA session is still valid (based on timestamp)
+ */
+export const isStoredMFASessionValid = (): boolean => {
+  const mfaVerifiedAt = localStorage.getItem('mfa_verified_at');
+  if (!mfaVerifiedAt) return false;
+  
+  try {
+    const verifiedTime = new Date(mfaVerifiedAt);
+    const now = new Date();
+    const hoursElapsed = (now.getTime() - verifiedTime.getTime()) / (1000 * 60 * 60);
+    return hoursElapsed < 24;
+  } catch {
+    return false;
+  }
+};
+
+// Export types - REMOVED MFAVerificationResponse since it's already exported as an interface
 export type { 
   MFALoginResponse,
-  MFAVerificationResponse,
-  MFAStatus  // Changed from MFAStatusResponse to MFAStatus
+  MFAStatus
 };

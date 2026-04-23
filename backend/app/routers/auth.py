@@ -1,4 +1,3 @@
-# backend/routers/auth.py
 from fastapi import APIRouter, HTTPException, status, Depends, BackgroundTasks
 from datetime import datetime, timedelta
 import secrets
@@ -17,7 +16,8 @@ from ..database import (
     update_user_mfa_code,
     clear_user_mfa_code,
     get_user_mfa_status,
-    get_db
+    get_db,
+    update_user_mfa_session  # Add this new database function
 )
 from ..schemas.auth import (
     ForgotPasswordRequest, 
@@ -29,7 +29,8 @@ from ..schemas.auth import (
     MFALoginResponse,
     User,
     UserCreate,
-    UserLogin
+    UserLogin,
+    MFASessionCheckRequest  # Add this new schema
 )
 from ..services.mfa_service import mfa_service
 from ..services.email_service import send_mfa_email, send_mfa_setup_email, send_reset_email
@@ -63,6 +64,7 @@ logger = logging.getLogger(__name__)
 @router.options("/setup-mfa")
 @router.options("/disable-mfa")
 @router.options("/mfa-status")
+@router.options("/check-mfa-session")
 async def options_handler():
     """Handle OPTIONS preflight requests without authentication"""
     return {}
@@ -112,7 +114,7 @@ async def validate_token(token: Dict[str, str]):
     # Check if token is valid
     if is_token_valid(token_str):
         token_info = get_token_expiry_info(token_str)
-        logger.debug(f"Token validated for subject: {token_info.get('subject')}")  # Changed to debug
+        logger.debug(f"Token validated for subject: {token_info.get('subject')}")
         return {
             "valid": True,
             "message": "Token is valid",
@@ -151,9 +153,11 @@ async def register(user_data: UserCreate):
     user = create_user({
         "email": user_data.email,
         "password": user_data.password,
-        "mfa_enabled": False,           # ✅ MFA disabled by default
-        "mfa_email": user_data.email,   # Keep email for future use
-        "mfa_setup_completed": False    # ✅ Not set up
+        "mfa_enabled": False,
+        "mfa_email": user_data.email,
+        "mfa_setup_completed": False,
+        "mfa_verified_at": None,  # Track when MFA was last verified
+        "mfa_session_token": None  # Track MFA session token
     })
     
     if not user:
@@ -199,7 +203,29 @@ async def login(user_credentials: UserLogin):
             detail="Invalid credentials"
         )
     
-    # ✅ ALWAYS require MFA for login (no condition check)
+    # Check if MFA session is still valid (within 24 hours)
+    mfa_verified_at = user.get("mfa_verified_at")
+    if mfa_verified_at:
+        # Convert string to datetime if needed
+        if isinstance(mfa_verified_at, str):
+            try:
+                mfa_verified_at = datetime.fromisoformat(mfa_verified_at.replace('Z', '+00:00'))
+            except ValueError:
+                mfa_verified_at = None
+        
+        # Check if within 24 hours
+        if mfa_verified_at and (datetime.utcnow() - mfa_verified_at) < timedelta(hours=24):
+            # MFA session is still valid, create token directly
+            access_token = create_access_token(data={"sub": user["email"]})
+            logger.info(f"User {user['email']} logged in using valid MFA session")
+            return {
+                "access_token": access_token,
+                "token_type": "bearer",
+                "email": user["email"],
+                "message": "Login successful (MFA session valid)"
+            }
+    
+    # Require MFA
     logger.debug(f"MFA required for user: {user['email']}")
     
     # Send MFA code automatically
@@ -231,7 +257,7 @@ async def send_mfa_code(request: Dict[str, str]):
     user = get_user_by_email(email)
     if not user:
         # Return success even if user doesn't exist for security
-        logger.debug(f"MFA code requested for non-existent user: {email}")  # Changed to debug
+        logger.debug(f"MFA code requested for non-existent user: {email}")
         return {"message": "If the email exists, a verification code has been sent"}
     
     # ✅ Always allow sending MFA code (no need to check if enabled)
@@ -244,9 +270,11 @@ async def send_mfa_code(request: Dict[str, str]):
 async def verify_mfa_code(request: MFAVerifyRequest):
     """
     Verify MFA code and return access token.
+    Supports "Remember Me for 24 hours" feature.
     """
     email = request.email
     mfa_code = request.mfa_code
+    remember_for_day = getattr(request, 'remember_for_day', False)  # Get remember me flag
     
     if not email or not mfa_code:
         raise HTTPException(
@@ -286,6 +314,20 @@ async def verify_mfa_code(request: MFAVerifyRequest):
     # Clear MFA code after successful verification
     clear_user_mfa_code(user["_id"])
     
+    # ✅ If "Remember Me" is checked, store MFA session
+    if remember_for_day:
+        mfa_session_token = secrets.token_urlsafe(32)
+        mfa_verified_at = datetime.utcnow()
+        
+        # Update user with MFA session info
+        update_user_mfa_session(
+            user_id=user["_id"],
+            mfa_verified_at=mfa_verified_at,
+            mfa_session_token=mfa_session_token
+        )
+        
+        logger.info(f"MFA session created for user: {user['email']} (valid for 24 hours)")
+    
     # Create access token
     access_token = create_access_token(data={"sub": user["email"]})
     
@@ -297,14 +339,60 @@ async def verify_mfa_code(request: MFAVerifyRequest):
         logger.error(f"CRITICAL: Token invalid immediately after creation for user: {user['email']}")
     
     # Log successful MFA verification
-    logger.info(f"MFA verification successful for user: {user['email']}")  # Keep as INFO
+    logger.info(f"MFA verification successful for user: {user['email']}")
     
-    return {
+    response_data = {
         "access_token": access_token,
         "token_type": "bearer",
         "email": user["email"],
         "message": "Login successful"
     }
+    
+    if remember_for_day:
+        response_data["mfa_session_token"] = mfa_session_token
+        response_data["expires_in"] = 86400  # 24 hours in seconds
+    
+    return response_data
+
+# -------------------------------
+# Check MFA Session Endpoint - NEW
+# -------------------------------
+@router.post("/check-mfa-session")
+async def check_mfa_session(request: MFASessionCheckRequest):
+    """
+    Check if MFA session is still valid (within 24 hours).
+    """
+    email = request.email
+    mfa_session_token = request.mfa_session_token
+    
+    if not email:
+        return {"mfa_required": True, "mfa_valid": False}
+    
+    user = get_user_by_email(email)
+    if not user:
+        return {"mfa_required": True, "mfa_valid": False}
+    
+    # Check if MFA was verified within last 24 hours
+    mfa_verified_at = user.get("mfa_verified_at")
+    stored_session_token = user.get("mfa_session_token")
+    
+    if mfa_verified_at and stored_session_token:
+        # Convert string to datetime if needed
+        if isinstance(mfa_verified_at, str):
+            try:
+                mfa_verified_at = datetime.fromisoformat(mfa_verified_at.replace('Z', '+00:00'))
+            except ValueError:
+                mfa_verified_at = None
+        
+        # Check if within 24 hours and token matches
+        if mfa_verified_at and (datetime.utcnow() - mfa_verified_at) < timedelta(hours=24):
+            if mfa_session_token and mfa_session_token == stored_session_token:
+                return {"mfa_required": False, "mfa_valid": True}
+            elif not mfa_session_token:
+                # Session exists but no token provided
+                return {"mfa_required": False, "mfa_valid": True, "session_exists": True}
+    
+    return {"mfa_required": True, "mfa_valid": False}
 
 # -------------------------------
 # Forgot Password Endpoint
@@ -315,13 +403,13 @@ async def forgot_password(request: ForgotPasswordRequest):
     Initiate password reset process.
     Always returns success to prevent email enumeration attacks.
     """
-    logger.debug(f"Forgot password requested for: {request.email}")  # Changed to debug
+    logger.debug(f"Forgot password requested for: {request.email}")
     
     user = get_user_by_email(request.email)
     
     # Always return success to prevent email enumeration
     if not user:
-        logger.debug(f"Password reset requested for non-existent email: {request.email}")  # Changed to debug
+        logger.debug(f"Password reset requested for non-existent email: {request.email}")
         return ForgotPasswordResponse(
             message="If the email exists, a reset link has been sent"
         )
@@ -347,7 +435,7 @@ async def forgot_password(request: ForgotPasswordRequest):
     # Send reset email
     try:
         result = await send_reset_email(user["email"], reset_token, user["email"])
-        logger.info(f"Password reset email sent to: {user['email']}")  # Keep as INFO
+        logger.info(f"Password reset email sent to: {user['email']}")
     except Exception as e:
         logger.error(f"Failed to send reset email to {user['email']}: {str(e)}")
         # Still return success for security
@@ -390,7 +478,7 @@ async def reset_password(request: ResetPasswordRequest):
     # Mark token as used
     mark_password_reset_token_used(request.token)
     
-    logger.info(f"Password reset successful for user ID: {token_record['user_id']}")  # Keep as INFO
+    logger.info(f"Password reset successful for user ID: {token_record['user_id']}")
     
     return ResetPasswordResponse(
         message="Password reset successfully"
@@ -451,7 +539,7 @@ async def setup_mfa(request: MFASetupRequest, background_tasks: BackgroundTasks)
         user_email=user["email"]
     )
     
-    logger.info(f"MFA enabled for user: {user['email']}")  # Keep as INFO
+    logger.info(f"MFA enabled for user: {user['email']}")
     
     return {
         "message": "MFA enabled successfully",
@@ -486,11 +574,13 @@ async def disable_mfa(request: Dict[str, str]):
             detail="MFA is already disabled for this account"
         )
     
-    # Disable MFA
+    # Disable MFA and clear session
     update_data = {
         "mfa_enabled": False,
         "mfa_code": None,
         "mfa_code_expires": None,
+        "mfa_verified_at": None,
+        "mfa_session_token": None,
         "updated_at": datetime.utcnow()
     }
     
@@ -503,7 +593,7 @@ async def disable_mfa(request: Dict[str, str]):
             detail="Failed to disable MFA"
         )
     
-    logger.info(f"MFA disabled for user: {user['email']}")  # Keep as INFO
+    logger.info(f"MFA disabled for user: {user['email']}")
     
     return {"message": "MFA disabled successfully"}
 
@@ -521,7 +611,7 @@ async def get_mfa_status(email: str):
         )
     
     return {
-        "mfa_enabled": user.get("mfa_enabled", False),  # Default to False
+        "mfa_enabled": user.get("mfa_enabled", False),
         "mfa_email": user.get("mfa_email"),
         "mfa_setup_completed": user.get("mfa_setup_completed", False)
     }
@@ -554,7 +644,7 @@ async def send_mfa_code_to_user(user: Dict[str, Any]):
             mfa_code=mfa_code,
             user_email=user["email"]
         )
-        logger.debug(f"MFA code sent to {mfa_email} for user {user['email']}")  # Changed to debug
+        logger.debug(f"MFA code sent to {mfa_email} for user {user['email']}")
     except Exception as e:
         logger.error(f"Failed to send MFA email to {mfa_email}: {e}")
         # Don't raise error to prevent email enumeration

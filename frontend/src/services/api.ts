@@ -119,7 +119,7 @@ api.interceptors.request.use(
   }
 );
 
-// ✅ Response interceptor with MFA and 401 handling - TEMPORARILY DISABLED AUTO-LOGOUT
+// ✅ Response interceptor with MFA and 401 handling
 api.interceptors.response.use(
   (response) => {
     console.log(`✅ [API] Response from ${response.config.url}: ${response.status}`);
@@ -142,7 +142,7 @@ api.interceptors.response.use(
       );
     }
 
-    // Handle 401 Unauthorized errors - TEMPORARILY DISABLED FOR DEBUGGING
+    // Handle 401 Unauthorized errors
     if (error.response?.status === 401) {
       console.log(`⚠️ [API] 401 Unauthorized for ${url}`);
       console.log(`🔍 [API] Debug information for 401:`);
@@ -174,19 +174,6 @@ api.interceptors.response.use(
         console.log(`🔄 [API] Clearing invalid axios header...`);
         delete api.defaults.headers.common['Authorization'];
       }
-      
-      // ✅ TEMPORARILY COMMENTED OUT - Don't auto-clear or redirect while debugging
-      /*
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      
-      // Only redirect if not on login page
-      if (!window.location.pathname.includes('/login')) {
-        setTimeout(() => {
-          window.location.href = '/login';
-        }, 100);
-      }
-      */
     }
 
     // Normal error normalization
@@ -336,6 +323,8 @@ export interface MFAVerifyResponse {
   token_type: string;
   email: string;
   message: string;
+  mfa_session_token?: string; // ✅ NEW: For "Remember Me" feature
+  expires_in?: number; // ✅ NEW: Expiry in seconds (86400 for 24 hours)
 }
 
 export interface MFASendCodeResponse {
@@ -346,6 +335,15 @@ export interface MFAStatusResponse {
   mfa_enabled: boolean;
   mfa_email?: string;
   mfa_setup_completed: boolean;
+}
+
+// ✅ ADDED: MFA Session Check Types
+export interface MFASessionCheckResponse {
+  mfa_required: boolean;
+  mfa_valid: boolean;
+  session_exists?: boolean;
+  expires_at?: string;
+  time_remaining_hours?: number;
 }
 
 // ✅ ADDED: Validate Token Types
@@ -456,13 +454,15 @@ export const authAPI = {
       new_password: newPassword 
     }),
 
-  // ✅ MFA Endpoints
-  verifyMFA: (email: string, mfaCode: string) => {
+  // ✅ UPDATED MFA Endpoints with "Remember Me" support
+  verifyMFA: (email: string, mfaCode: string, rememberForDay: boolean = false) => {
     console.log('[Auth] Verifying MFA for:', email);
+    console.log('[Auth] Remember for 24 hours:', rememberForDay);
     console.log('[Auth] Current axios Authorization before MFA:', getAuthorizationHeader());
     return api.post<MFAVerifyResponse>('/auth/verify-mfa', { 
       email, 
-      mfa_code: mfaCode 
+      mfa_code: mfaCode,
+      remember_for_day: rememberForDay  // ✅ NEW: Send remember_for_day parameter
     });
   },
 
@@ -481,6 +481,13 @@ export const authAPI = {
 
   disableMFA: (email: string) =>
     api.post<{ message: string }>('/auth/disable-mfa', { email }),
+
+  // ✅ NEW: Check MFA session endpoint for "Remember Me" feature
+  checkMFASession: (email: string, mfaSessionToken?: string) =>
+    api.post<MFASessionCheckResponse>('/auth/check-mfa-session', { 
+      email, 
+      mfa_session_token: mfaSessionToken 
+    }),
 
   // ✅ New: Test endpoint to verify token is working
   testAuth: () => api.get<{ message: string; user: string }>('/auth/test', {
@@ -586,6 +593,7 @@ export const mfaAPI = {
   getStatus: authAPI.getMFAStatus,
   setup: authAPI.setupMFA,
   disable: authAPI.disableMFA,
+  checkSession: authAPI.checkMFASession, // ✅ NEW
 };
 
 // ✅ ADDED: Export updatePage function for direct usage - FIXED return type
@@ -627,7 +635,7 @@ export const getStatusText = (page: TrackedPage): string => {
   return 'Pending';
 };
 
-// ✅ Token management utilities - UPDATED
+// ✅ Token management utilities - UPDATED with MFA session support
 export const tokenUtils = {
   getToken: (): string | null => {
     const token = localStorage.getItem('token');
@@ -698,13 +706,50 @@ export const tokenUtils = {
     }
   },
   
-  // ✅ MFA Token Handling
-  setMFAToken: (tokenData: { access_token: string; token_type: string }): void => {
+  // ✅ MFA Token Handling with "Remember Me" support
+  setMFAToken: (tokenData: { access_token: string; token_type: string; mfa_session_token?: string; expires_in?: number }): void => {
     console.log(`[Token] Setting MFA token`);
     localStorage.setItem('token', tokenData.access_token);
     localStorage.setItem('token_type', tokenData.token_type);
     api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.access_token}`;
+    
+    // ✅ Store MFA session token if provided (for "Remember Me")
+    if (tokenData.mfa_session_token) {
+      localStorage.setItem('mfa_session_token', tokenData.mfa_session_token);
+      localStorage.setItem('mfa_verified_at', new Date().toISOString());
+      console.log(`[Token] MFA session token stored (valid for 24 hours)`);
+    }
+    
     console.log(`[Token] MFA token set and axios configured`);
+  },
+  
+  // ✅ NEW: Get MFA session token
+  getMFASessionToken: (): string | null => {
+    return localStorage.getItem('mfa_session_token');
+  },
+  
+  // ✅ NEW: Check if MFA session is valid (based on timestamp)
+  isMFASessionValid: (): boolean => {
+    const mfaVerifiedAt = localStorage.getItem('mfa_verified_at');
+    if (!mfaVerifiedAt) return false;
+    
+    try {
+      const verifiedTime = new Date(mfaVerifiedAt);
+      const now = new Date();
+      const hoursElapsed = (now.getTime() - verifiedTime.getTime()) / (1000 * 60 * 60);
+      const isValid = hoursElapsed < 24;
+      console.log(`[Token] MFA session valid: ${isValid}, hours elapsed: ${hoursElapsed.toFixed(1)}`);
+      return isValid;
+    } catch {
+      return false;
+    }
+  },
+  
+  // ✅ NEW: Clear MFA session
+  clearMFASession: (): void => {
+    console.log(`[Token] Clearing MFA session`);
+    localStorage.removeItem('mfa_session_token');
+    localStorage.removeItem('mfa_verified_at');
   },
   
   clearAuthData: (): void => {
@@ -712,6 +757,8 @@ export const tokenUtils = {
     localStorage.removeItem('token');
     localStorage.removeItem('token_type');
     localStorage.removeItem('user');
+    localStorage.removeItem('mfa_session_token');
+    localStorage.removeItem('mfa_verified_at');
     delete api.defaults.headers.common['Authorization'];
   },
   
@@ -724,6 +771,10 @@ export const tokenUtils = {
     
     const authHeader = getAuthorizationHeader();
     console.log(`  - Axios Authorization header:`, authHeader ? `${authHeader.substring(0, 50)}...` : 'NOT SET');
+    
+    const mfaSessionToken = localStorage.getItem('mfa_session_token');
+    console.log(`  - MFA Session Token:`, mfaSessionToken ? 'Present' : 'Missing');
+    console.log(`  - MFA Session Valid:`, tokenUtils.isMFASessionValid());
     
     if (token) {
       try {
@@ -770,6 +821,31 @@ export const getMFADataFromError = (error: any): MFALoginResponse | null => {
     };
   }
   return null;
+};
+
+// ✅ NEW: Function to check MFA session before login attempt
+export const checkMFASessionBeforeLogin = async (email: string): Promise<boolean> => {
+  const mfaSessionToken = tokenUtils.getMFASessionToken();
+  if (!mfaSessionToken || !tokenUtils.isMFASessionValid()) {
+    console.log('[MFA] No valid MFA session found');
+    return false;
+  }
+  
+  try {
+    console.log('[MFA] Checking MFA session with backend...');
+    const response = await authAPI.checkMFASession(email, mfaSessionToken);
+    console.log('[MFA] Session check result:', response.data);
+    
+    if (!response.data.mfa_required) {
+      // Session is valid, we can attempt auto-login
+      console.log('[MFA] Valid MFA session found, auto-login possible');
+      return true;
+    }
+  } catch (error) {
+    console.error('[MFA] Session check failed:', error);
+  }
+  
+  return false;
 };
 
 // ✅ NEW: Test function to verify API connectivity - FIXED: Changed timeout from 5000 to 30000

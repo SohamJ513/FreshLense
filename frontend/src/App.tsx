@@ -10,10 +10,11 @@ import LandingPage from './pages/LandingPage';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import ResetPassword from './components/Auth/ResetPassword';
+import MFAVerify from './components/Auth/MFAVerify'; // ✅ ADDED MFAVerify import
 import Dashboard from './components/Dashboard/Dashboard';
 import FactCheckPage from './pages/FactCheckPage';
 import DirectFactCheckPage from './pages/DirectFactCheckPage';
-import { AnalyticsPage } from './pages/AnalyticsPage'; // ✅ ADDED
+import { AnalyticsPage } from './pages/AnalyticsPage';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 const theme = createTheme({
@@ -39,7 +40,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   useEffect(() => {
     const checkTokenValidity = async () => {
-      // Only validate if authenticated and not loading
       if (isAuthenticated && !loading && tokenValid === null) {
         setValidating(true);
         try {
@@ -62,7 +62,6 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
 
   if (loading || validating) return <LoadingSpinner />;
   
-  // Redirect if token validation failed
   if (tokenValid === false) {
     return <Navigate to="/login" />;
   }
@@ -81,14 +80,13 @@ const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
   return !isAuthenticated ? <>{children}</> : <Navigate to="/dashboard" />;
 };
 
-// ✅ MFA Route - handles MFA verification
+// MFA Route - handles MFA verification
 const MFARoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
   const [mfaPending, setMfaPending] = React.useState(false);
   const [mfaEmail, setMfaEmail] = React.useState('');
   
   React.useEffect(() => {
-    // Check localStorage for MFA state
     const pending = localStorage.getItem('mfa_pending') === 'true';
     const email = localStorage.getItem('mfa_email') || '';
     setMfaPending(pending);
@@ -97,15 +95,10 @@ const MFARoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   if (loading) return <LoadingSpinner />;
   
-  // Allow MFA route only if:
-  // 1. Not already authenticated
-  // 2. MFA is pending
-  // 3. We have an email for MFA
   if (!isAuthenticated && mfaPending && mfaEmail) {
     return <>{children}</>;
   }
   
-  // Otherwise redirect to login
   return <Navigate to="/login" />;
 };
 
@@ -119,11 +112,7 @@ const LandingRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 const AuthAwareRoute: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
   
-  // ✅ FIXED: Moved useEffect BEFORE any conditional returns
-  React.useEffect(() => {
-    // This will run once on mount
-    // You can add any side effects here if needed
-  }, []);
+  React.useEffect(() => {}, []);
   
   if (loading) return <LoadingSpinner />;
   
@@ -156,10 +145,10 @@ function App() {
               </PublicRoute>
             } />
             
-            {/* ✅ MFA Verification Route */}
+            {/* ✅ FIXED MFA Verification Route - Now renders MFAVerify instead of Login */}
             <Route path="/verify-mfa" element={
               <MFARoute>
-                <Login /> {/* Login component handles MFA internally */}
+                <MFAVerify email={localStorage.getItem('mfa_email') || ''} />
               </MFARoute>
             } />
             
@@ -178,7 +167,6 @@ function App() {
               </ProtectedRoute>
             } />
             
-            {/* ✅ ANALYTICS ROUTE - NEW */}
             <Route path="/analytics" element={
               <ProtectedRoute>
                 <Layout>
