@@ -46,10 +46,10 @@ interface AxiosErrorResponse<T = ErrorResponseData> {
   headers: any;
 }
 
-// Create axios instance
+// Create axios instance - INCREASED TIMEOUT to 2 minutes for cold starts
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000,
+  timeout: 120000, // ✅ CHANGED: 120000ms (2 minutes) from 60000ms to handle Render cold starts
   headers: {
     'Content-Type': 'application/json',
   },
@@ -848,12 +848,12 @@ export const checkMFASessionBeforeLogin = async (email: string): Promise<boolean
   return false;
 };
 
-// ✅ NEW: Test function to verify API connectivity - FIXED: Changed timeout from 5000 to 30000
+// ✅ UPDATED: Test function to verify API connectivity - INCREASED TIMEOUT
 export const testAPIConnection = async (): Promise<{ success: boolean; message: string }> => {
   try {
     console.log(`🧪 [API Test] Testing connection to ${API_BASE_URL}`);
     const response = await api.get('/health', {
-      timeout: 30000, // ✅ FIXED: Changed from 5000 to 30000
+      timeout: 120000, // ✅ CHANGED: 120000ms (2 minutes) to handle cold starts
       validateStatus: (status) => status < 500
     });
     console.log(`✅ [API Test] Connection successful:`, response.status);
