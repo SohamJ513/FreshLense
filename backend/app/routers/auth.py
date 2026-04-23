@@ -176,13 +176,13 @@ async def register(user_data: UserCreate):
     }
 
 # -------------------------------
-# Login Endpoint - ALWAYS REQUIRES MFA
+# Login Endpoint - UPDATED with BackgroundTasks
 # -------------------------------
 @router.post("/login")
-async def login(user_credentials: UserLogin):
+async def login(user_credentials: UserLogin, background_tasks: BackgroundTasks):
     """
     User login - ALWAYS requires MFA for all users.
-    MFA code will be sent to user's email.
+    MFA code will be sent to user's email in the background.
     """
     # Get user from database
     user = get_user_by_email(user_credentials.email)
@@ -225,26 +225,26 @@ async def login(user_credentials: UserLogin):
                 "message": "Login successful (MFA session valid)"
             }
     
-    # Require MFA
+    # Require MFA - Send code in background (doesn't block response)
     logger.debug(f"MFA required for user: {user['email']}")
     
-    # Send MFA code automatically
-    await send_mfa_code_to_user(user)
+    # Send MFA code in background - THIS IS THE FIX
+    background_tasks.add_task(send_mfa_code_to_user, user)
     
-    # ✅ Return MFA required response
+    # ✅ Return MFA required response immediately (email sends in background)
     return {
         "requires_mfa": True,
         "email": user["email"],
-        "message": "MFA code sent to your email"
+        "message": "MFA code being sent to your email"
     }
 
 # -------------------------------
-# MFA Endpoints
+# Send MFA Code Endpoint - UPDATED with BackgroundTasks
 # -------------------------------
 @router.post("/send-mfa-code")
-async def send_mfa_code(request: Dict[str, str]):
+async def send_mfa_code(request: Dict[str, str], background_tasks: BackgroundTasks):
     """
-    Send MFA code to user's email.
+    Send MFA code to user's email in the background.
     Can be used for login or during MFA setup.
     """
     email = request.get("email")
@@ -260,11 +260,10 @@ async def send_mfa_code(request: Dict[str, str]):
         logger.debug(f"MFA code requested for non-existent user: {email}")
         return {"message": "If the email exists, a verification code has been sent"}
     
-    # ✅ Always allow sending MFA code (no need to check if enabled)
-    # Send MFA code
-    await send_mfa_code_to_user(user)
+    # Send MFA code in background - THIS IS THE FIX
+    background_tasks.add_task(send_mfa_code_to_user, user)
     
-    return {"message": "MFA code sent to your email"}
+    return {"message": "MFA code being sent to your email"}
 
 @router.post("/verify-mfa")
 async def verify_mfa_code(request: MFAVerifyRequest):
@@ -622,6 +621,7 @@ async def get_mfa_status(email: str):
 async def send_mfa_code_to_user(user: Dict[str, Any]):
     """
     Generate and send MFA code to user.
+    This function is meant to be run in the background.
     """
     # Generate new MFA code
     mfa_code = mfa_service.generate_mfa_code()
