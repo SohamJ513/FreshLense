@@ -10,11 +10,13 @@ import LandingPage from './pages/LandingPage';
 import Login from './components/Auth/Login';
 import Register from './components/Auth/Register';
 import ResetPassword from './components/Auth/ResetPassword';
-import MFAVerify from './components/Auth/MFAVerify'; // ✅ ADDED MFAVerify import
+import MFAVerify from './components/Auth/MFAVerify';
 import Dashboard from './components/Dashboard/Dashboard';
 import FactCheckPage from './pages/FactCheckPage';
 import DirectFactCheckPage from './pages/DirectFactCheckPage';
 import { AnalyticsPage } from './pages/AnalyticsPage';
+import ProfilePage from './pages/ProfilePage';
+import SettingsPage from './pages/SettingsPage';
 import LoadingSpinner from './components/common/LoadingSpinner';
 
 const theme = createTheme({
@@ -145,7 +147,7 @@ function App() {
               </PublicRoute>
             } />
             
-            {/* ✅ FIXED MFA Verification Route - Now renders MFAVerify instead of Login */}
+            {/* MFA Verification Route */}
             <Route path="/verify-mfa" element={
               <MFARoute>
                 <MFAVerify email={localStorage.getItem('mfa_email') || ''} />
@@ -158,7 +160,7 @@ function App() {
               </PublicRoute>
             } />
             
-            {/* Protected Routes */}
+            {/* Protected Routes - Main Pages */}
             <Route path="/dashboard" element={
               <ProtectedRoute>
                 <Layout>
@@ -187,6 +189,23 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <DirectFactCheckPage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* ✅ NEW: Profile and Settings Routes */}
+            <Route path="/profile" element={
+              <ProtectedRoute>
+                <Layout>
+                  <ProfilePage />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            
+            <Route path="/settings" element={
+              <ProtectedRoute>
+                <Layout>
+                  <SettingsPage />
                 </Layout>
               </ProtectedRoute>
             } />

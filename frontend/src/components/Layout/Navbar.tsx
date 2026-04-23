@@ -63,6 +63,16 @@ const Navbar: React.FC = () => {
     setAnchorEl(null);
   };
 
+  const handleProfileClick = () => {
+    handleUserMenuClose();
+    navigate('/profile');
+  };
+
+  const handleSettingsClick = () => {
+    handleUserMenuClose();
+    navigate('/settings');
+  };
+
   const handleLogoutClick = () => {
     handleUserMenuClose();
     setLogoutDialogOpen(true);
@@ -218,13 +228,13 @@ const Navbar: React.FC = () => {
           </Typography>
         </Box>
         <Divider />
-        <MenuItem onClick={handleUserMenuClose} sx={{ py: 1 }}>
+        <MenuItem onClick={handleProfileClick} sx={{ py: 1 }}>
           <ListItemIcon>
             <PersonIcon fontSize="small" color="primary" />
           </ListItemIcon>
           <ListItemText primary="Profile" />
         </MenuItem>
-        <MenuItem onClick={handleUserMenuClose} sx={{ py: 1 }}>
+        <MenuItem onClick={handleSettingsClick} sx={{ py: 1 }}>
           <ListItemIcon>
             <SettingsIcon fontSize="small" color="primary" />
           </ListItemIcon>

@@ -44,6 +44,7 @@ try:
         users_collection.create_index([("is_deleted", ASCENDING)])
         users_collection.create_index([("mfa_verified_at", ASCENDING)])  # ✅ NEW: For MFA session queries
         users_collection.create_index([("mfa_session_token", ASCENDING)])  # ✅ NEW: For MFA session lookups
+        users_collection.create_index([("display_name", ASCENDING)])  # ✅ NEW: For profile queries
         
         # Pages indexes
         pages_collection.create_index([("user_id", ASCENDING), ("url", ASCENDING)], unique=True)
@@ -172,9 +173,11 @@ def create_user(user_data: dict):
         "email": user_data.get('email'),
         "hashed_password": hashed_password,
         "created_at": datetime.utcnow(),
+        "display_name": user_data.get('display_name', None),  # ✅ NEW: display name field
         "notification_preferences": {
             "email_alerts": True,
-            "frequency": "immediately"
+            "frequency": "immediately",
+            "default_check_interval": 1440  # ✅ NEW: default check interval for new pages
         },
         "is_deleted": False,
         "deleted_at": None,
@@ -242,6 +245,129 @@ def soft_delete_user(user_id: str, deleted_by: str = "system", reason: str = "")
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash"""
     return pwd_context.verify(plain_password, hashed_password)
+
+
+# ---------------- User Profile Management (NEW) ----------------
+def update_user_profile(user_id, display_name: str) -> bool:
+    """Update user's display name"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        result = users_collection.update_one(
+            {"_id": user_id, "is_deleted": {"$ne": True}},
+            {"$set": {"display_name": display_name, "updated_at": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating user profile: {e}")
+        return False
+
+
+def update_user_password_hash(user_id, hashed_password: str) -> bool:
+    """Update user's password hash"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        result = users_collection.update_one(
+            {"_id": user_id, "is_deleted": {"$ne": True}},
+            {"$set": {"hashed_password": hashed_password, "updated_at": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating user password: {e}")
+        return False
+
+
+def update_notification_settings(user_id, notification_prefs: dict) -> bool:
+    """Update user's notification preferences"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        result = users_collection.update_one(
+            {"_id": user_id, "is_deleted": {"$ne": True}},
+            {"$set": {"notification_preferences": notification_prefs, "updated_at": datetime.utcnow()}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Error updating notification settings: {e}")
+        return False
+
+
+def delete_user_account(user_id) -> bool:
+    """Permanently delete user account and all associated data"""
+    if db is None:
+        return False
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        # 1. Delete all tracked pages for this user
+        pages = pages_collection.find({"user_id": user_id})
+        for page in pages:
+            page_id = page["_id"]
+            # Delete versions for each page
+            versions_collection.delete_many({"page_id": page_id})
+            # Delete change logs for each page
+            changes_collection.delete_many({"page_id": page_id})
+        
+        # 2. Delete all tracked pages
+        pages_collection.delete_many({"user_id": user_id})
+        
+        # 3. Delete all change logs for user
+        changes_collection.delete_many({"user_id": user_id})
+        
+        # 4. Delete password reset tokens
+        password_reset_tokens_collection.delete_many({"user_id": user_id})
+        
+        # 5. Finally, delete the user
+        result = users_collection.delete_one({"_id": user_id})
+        
+        if result.deleted_count > 0:
+            log_audit_event(
+                operation="USER_PERMANENTLY_DELETED",
+                user_id=str(user_id),
+                performed_by="system",
+                details="User account and all associated data permanently deleted"
+            )
+            print(f"✅ User {user_id} and all associated data deleted permanently")
+            return True
+        
+        return False
+    except Exception as e:
+        print(f"Error deleting user account: {e}")
+        return False
+
+
+def get_user_settings(user_id):
+    """Get user's notification settings"""
+    if db is None:
+        return None
+    
+    try:
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+        
+        user = users_collection.find_one(
+            {"_id": user_id, "is_deleted": {"$ne": True}},
+            {"notification_preferences": 1, "mfa_enabled": 1}
+        )
+        return user
+    except Exception as e:
+        print(f"Error getting user settings: {e}")
+        return None
 
 
 # ---------------- MFA Database Functions ----------------

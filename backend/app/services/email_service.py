@@ -265,7 +265,66 @@ async def send_reset_email(to_email: str, reset_token: str, user_email: str):
 # Alias for backward compatibility
 send_password_reset_email = send_reset_email
 
-# Other email functions (not needed for auth.py)
+async def send_account_deletion_email(to_email: str):
+    """
+    Send account deletion confirmation email.
+    """
+    subject = "FreshLense Account Deleted"
+    html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+            <h1 style="color: white; margin: 0; font-size: 28px;">Account Deleted</h1>
+        </div>
+        <div style="background: white; padding: 30px; border-radius: 0 0 10px 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <h2 style="color: #dc2626; margin-top: 0;">Your FreshLense Account Has Been Deleted</h2>
+            <p>Hello,</p>
+            <p>We're sorry to see you go! Your FreshLense account has been permanently deleted.</p>
+            
+            <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #991b1b;">
+                    <strong>What has been deleted:</strong><br>
+                    • Your account and profile information<br>
+                    • All monitored pages and their history<br>
+                    • All change logs and versions<br>
+                    • All AI summaries and fact checks
+                </p>
+            </div>
+            
+            <p>If you did not request this deletion, please contact our support team immediately.</p>
+            
+            <p style="color: #999; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee;">
+                This is an automated message, please do not reply.
+            </p>
+            
+            <p style="margin-top: 30px;">
+                Thank you for using FreshLense,<br>
+                <strong>The FreshLense Team</strong>
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    text = f"""
+    FreshLense Account Deleted
+    
+    Your FreshLense account has been permanently deleted.
+    
+    What has been deleted:
+    - Your account and profile information
+    - All monitored pages and their history
+    - All change logs and versions
+    - All AI summaries and fact checks
+    
+    If you did not request this deletion, please contact our support team immediately.
+    
+    Thank you for using FreshLense.
+    """
+    
+    return await send_email(to_email, subject, html, text)
+
+# Other email functions
 async def send_welcome_email(user_email: str):
     subject = "Welcome to FreshLense!"
     html = f"""

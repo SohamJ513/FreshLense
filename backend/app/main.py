@@ -68,7 +68,7 @@ from .scheduler import MonitoringScheduler
 from .crawler import ContentFetcher
 
 # ✅ Import routers
-from .routers import fact_check, auth, pages, analytics
+from .routers import fact_check, auth, pages, analytics, user  # ✅ ADDED user router
 
 # ✅ Import services
 from .services.ai_service import ai_service
@@ -333,6 +333,7 @@ app.include_router(auth.router)
 app.include_router(pages.router)
 app.include_router(analytics.router)
 app.include_router(fact_check.router, dependencies=[Depends(get_current_user)])
+app.include_router(user.router)  # ✅ ADDED user router
 
 # -------------------- Tracked Pages Routes --------------------
 @app.get("/api/pages", response_model=List[TrackedPageResponse])
