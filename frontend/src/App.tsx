@@ -1,5 +1,5 @@
 // frontend/src/App.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
@@ -82,26 +82,75 @@ const PublicRoute: React.FC<PublicRouteProps> = ({ children }) => {
   return !isAuthenticated ? <>{children}</> : <Navigate to="/dashboard" />;
 };
 
-// MFA Route - handles MFA verification
+// ✅ FIXED: MFA Route - handles MFA verification with proper state management
 const MFARoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, mfaEmail: contextMfaEmail } = useAuth();
   const [mfaPending, setMfaPending] = React.useState(false);
   const [mfaEmail, setMfaEmail] = React.useState('');
   
   React.useEffect(() => {
+    // Check both localStorage and AuthContext
     const pending = localStorage.getItem('mfa_pending') === 'true';
-    const email = localStorage.getItem('mfa_email') || '';
+    const email = localStorage.getItem('mfa_email') || contextMfaEmail || '';
+    
+    console.log('🔐 [MFARoute] State check:', { 
+      pending, 
+      email, 
+      contextMfaEmail,
+      isAuthenticated,
+      loading 
+    });
+    
     setMfaPending(pending);
     setMfaEmail(email);
-  }, []);
+  }, [contextMfaEmail, isAuthenticated, loading]);
 
   if (loading) return <LoadingSpinner />;
   
-  if (!isAuthenticated && mfaPending && mfaEmail) {
+  // If authenticated already, redirect to dashboard
+  if (isAuthenticated) {
+    console.log('🔐 [MFARoute] Already authenticated, redirecting to dashboard');
+    return <Navigate to="/dashboard" replace />;
+  }
+  
+  // If MFA is pending and we have an email, show MFA verification
+  if (mfaPending && mfaEmail) {
+    console.log('🔐 [MFARoute] MFA required for:', mfaEmail);
     return <>{children}</>;
   }
   
-  return <Navigate to="/login" />;
+  // Otherwise redirect to login
+  console.log('🔐 [MFARoute] No MFA pending, redirecting to login');
+  return <Navigate to="/login" replace />;
+};
+
+// ✅ NEW: MFA Wrapper Component - gets email from localStorage reactively
+const MFAWrapper: React.FC = () => {
+  const [email, setEmail] = React.useState('');
+  
+  React.useEffect(() => {
+    // Get email from localStorage
+    const storedEmail = localStorage.getItem('mfa_email') || '';
+    console.log('🔐 [MFAWrapper] Getting email from storage:', storedEmail);
+    setEmail(storedEmail);
+    
+    // Listen for storage changes
+    const handleStorageChange = () => {
+      const newEmail = localStorage.getItem('mfa_email') || '';
+      console.log('🔐 [MFAWrapper] Storage changed, new email:', newEmail);
+      setEmail(newEmail);
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  if (!email) {
+    console.log('🔐 [MFAWrapper] No email found, redirecting to login');
+    return <Navigate to="/login" replace />;
+  }
+
+  return <MFAVerify email={email} />;
 };
 
 const LandingRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -147,10 +196,10 @@ function App() {
               </PublicRoute>
             } />
             
-            {/* MFA Verification Route */}
+            {/* ✅ FIXED: MFA Verification Route with wrapper */}
             <Route path="/verify-mfa" element={
               <MFARoute>
-                <MFAVerify email={localStorage.getItem('mfa_email') || ''} />
+                <MFAWrapper />
               </MFARoute>
             } />
             
@@ -162,6 +211,15 @@ function App() {
             
             {/* Protected Routes - Main Pages */}
             <Route path="/dashboard" element={
+              <ProtectedRoute>
+                <Layout>
+                  <Dashboard />
+                </Layout>
+              </ProtectedRoute>
+            } />
+            
+            {/* ✅ ADDED: Dashboard fallback route for nested paths */}
+            <Route path="/dashboard/*" element={
               <ProtectedRoute>
                 <Layout>
                   <Dashboard />
@@ -193,7 +251,6 @@ function App() {
               </ProtectedRoute>
             } />
             
-            {/* ✅ NEW: Profile and Settings Routes */}
             <Route path="/profile" element={
               <ProtectedRoute>
                 <Layout>
