@@ -23,7 +23,7 @@ class AIService:
         self.enabled = True
         
         # Groq model selection
-        self.model = os.getenv("OPENAI_MODEL", "llama-3.3-70b-specdec")
+        self.model = os.getenv("OPENAI_MODEL", "openai/gpt-oss-120b")
         self.temperature = 0.3  # Low temperature for consistent results
         
         logger.info(f"✅ AI Service initialized with Groq model: {self.model}")
